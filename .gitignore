@@ -1,0 +1,32 @@
+# Ambiente virtual (pesado, especifico da maquina)
+pvenv/
+.venv/
+venv/
+
+# Cache e artefatos de Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Configuracao local / possiveis segredos (chaves de API, paths locais)
+Params/.config
+*.env
+.env
+
+# Dados e resultados gerados pelo pipeline (pesados e reprodutiveis a partir do codigo)
+Outputs/stocks/
+Outputs/runs/
+Outputs/validation/
+Outputs/plots/
+Outputs/logs/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

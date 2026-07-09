@@ -1,0 +1,18 @@
+{
+  "params_dir": "Params",
+  "configs_file": "Params/configs.json",
+  "stocks_file": "Params/stocks.json",
+  "requirements_file": "requirements.txt",
+
+  "scripts_dir": "Scripts",
+  "utils_dir": "Utils",
+
+  "outputs_dir": "Outputs",
+  "stocks_cache_dir": "Outputs/stocks",
+  "stocks_warehouse_file": "Outputs/stocks/warehouse.pkl",
+  "runs_dir": "Outputs/runs",
+  "validation_dir": "Outputs/validation",
+  "plots_dir": "Outputs/plots",
+  "logs_dir": "Outputs/logs",
+  "logs_file": "Outputs/logs/pipeline.log"
+}

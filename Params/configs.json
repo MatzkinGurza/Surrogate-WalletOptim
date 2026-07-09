@@ -1,0 +1,27 @@
+{
+  "general": {
+    "seed": 42
+  },
+  "doe": {
+    "n_initial_samples": 30,
+    "sampling_method": "sobol"
+  },
+  "optimization": {
+    "risk_free_rate": 0.045,
+    "acquisition_function": "expected_improvement",
+    "evaluation_budget": 100,
+    "convergence_patience": 15,
+    "convergence_tolerance": 1e-4
+  },
+  "validation": {
+    "train_window_years": 3,
+    "test_window_years": 1,
+    "step_years": 1
+  },
+  "plots": {
+    "regenerate_plots": true,
+    "output_format": "png",
+    "price_series_normalized": true,
+    "price_series_log_scale": true
+  }
+}

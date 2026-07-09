@@ -1,0 +1,23 @@
+# Coleta e preparacao de dados (Secao 3.4)
+yfinance>=0.2.40      # download de precos ajustados de acoes via Yahoo Finance
+pandas>=2.2            # series temporais e manipulacao tabular
+numpy>=1.26             # algebra linear (pesos, retornos, matriz de covariancia)
+
+# Estimacao de retorno/risco, funcao objetivo e CAPM (Secao 3.5, 3.6, 2.6.3)
+scipy>=1.13              # log-retornos, scipy.stats.norm (Expected Improvement), otimizador local
+statsmodels>=0.14         # regressao OLS para beta do CAPM (extensao opcional)
+
+# Projeto de experimentos e amostragem no simplex (Secao 3.7)
+# LHS e Sobol vem de scipy.stats.qmc, ja listado acima
+
+# Modelo substituto e otimizacao bayesiana (Secao 3.8, 3.9)
+scikit-learn>=1.5          # GaussianProcessRegressor (substituto padrao) e RandomForest/GradientBoosting (alternativas de arvore)
+optuna>=3.6                 # amostrador TPE (alternativa de substituto, You et al. 2025)
+
+# Visualizacao (Secao 3.10)
+matplotlib>=3.9
+seaborn>=0.13
+plotly>=5.22                 # graficos ternarios para a superficie sobre o simplex de 3 ativos
+
+# Utilitarios
+tqdm>=4.66                    # barra de progresso no laco iterativo de otimizacao bayesiana

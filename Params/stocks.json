@@ -1,0 +1,21 @@
+{
+  "tickers": [
+                "AAPL",
+                "MSFT",
+                "JNJ",
+                "JPM",
+                "PG",
+                "XOM",
+                "CAT",
+                "HD",
+                "NEE",
+                "LIN"
+  ],
+  "start_date": "2010-01-01",
+  "end_date": "2026-01-01",
+  "interval": "1d",
+  "auto_adjust": true,
+  "price_field": "Close",
+  "data_source": "Yahoo Finance",
+  "trading_days_per_year": 252
+}
