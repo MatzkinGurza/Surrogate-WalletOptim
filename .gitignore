@@ -24,6 +24,10 @@ Outputs/logs/
 
 # Notebooks
 .ipynb_checkpoints/
+Tests/
+Test/
+tests/
+test/
 
 # Editor / SO
 .vscode/
