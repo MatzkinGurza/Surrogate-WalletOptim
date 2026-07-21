@@ -123,16 +123,20 @@ class VaR:
         self.type = type
 
     def __repr__(self):
-        return f"<Object: Callable VaR> (n_assets={self.n_assets}; alpha={self.alpha}; type={type})"
+        return f"<Object: Callable VaR> (n_assets={self.n_assets}; alpha={self.alpha}; type={self.type})"
     
     def orderDistibution(self, ret: np.ndarray):
         return np.sort(ret)
     
-    def plotDistribution(self, ret: np.ndarray, bins: int = 50) -> plt.Figure:
+    def plotDistribution(self, ret: np.ndarray, bins: int = 50,
+                          capital: Optional[float] = None, title: Optional[str] = None) -> plt.Figure:
         """
         Plots the returns distribution indicating the VaR threshold </p>
         ret (np.ndarray): 1-Dimensional portfolio return series </p>
         bins (int): number of histogram bins </p>
+        capital (float, optional): symbolic capital used to add a secondary monetary axis
+            (top x-axis) and monetary amounts in the VaR label; omit to keep everything in returns </p>
+        title (str, optional): overrides the default axes title (e.g. to identify the portfolio) </p>
         Returns the matplotlib Figure
         """
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -147,12 +151,19 @@ class VaR:
             var, mu, sigma = self(ret)
             ax.plot(x, norm.pdf(x, mu, sigma), color="black", linewidth=1.5, linestyle="--", label="Normal ajustada")
 
-        ax.axvspan(ax.get_xlim()[0], var, color="red", alpha=0.15, label="Cauda (≤ VaR)")
-        ax.axvline(var, color="red", linestyle="--", linewidth=2, label=f"VaR ({self.alpha:.0%}) = {var:.4f}")
+        var_label = f"VaR ({self.alpha:.0%}) = {var:.2%}"
+        if capital is not None:
+            var_label += f" (R$ {var * capital:,.2f})"
 
-        ax.set_title(f"Distribuição de retornos e VaR ({self.type})")
+        ax.axvspan(ax.get_xlim()[0], var, color="red", alpha=0.15, label="Cauda (≤ VaR)")
+        ax.axvline(var, color="red", linestyle="--", linewidth=2, label=var_label)
+
+        ax.set_title(title or f"Distribuição de retornos e VaR ({self.type})")
         ax.set_xlabel("Retorno")
         ax.set_ylabel("Densidade")
+        if capital is not None:
+            money_axis = ax.secondary_xaxis("top", functions=(lambda x: x * capital, lambda x: x / capital))
+            money_axis.set_xlabel(f"Resultado sobre capital de R$ {capital:,.2f}")
         ax.legend(loc="upper left", fontsize="small")
         fig.tight_layout()
         return fig
@@ -170,10 +181,10 @@ class VaR:
             return np.percentile(ret, self.alpha*100, method="higher"), ret_sorted
         elif self.type == "parametric":
             mu = ret.mean()
-            sigma = ret.std(ddof=1)  
+            sigma = ret.std(ddof=1)
             z_alpha = norm.ppf(self.alpha)
-            var_return = mu - z_alpha * sigma  
-            return var_return, mu, sigma 
+            var_return = mu + z_alpha * sigma
+            return var_return, mu, sigma
         else:
             message = "no valid type was found therefore no calculation war returned"
             raise ValueError(message)
@@ -200,13 +211,18 @@ class CVaR(VaR):
         return super().__call__(ret)
 
     def __repr__(self):
-        return f"<Object: Callable CVaR> (n_assets={self.n_assets}; alpha={self.alpha}; type={type})"
+        return f"<Object: Callable CVaR> (n_assets={self.n_assets}; alpha={self.alpha}; type={self.type})"
     
-    def plotDistribution(self, ret: np.ndarray, bins: int = 50) -> plt.Figure:
+    def plotDistribution(self, ret: np.ndarray, bins: int = 50,
+                          capital: Optional[float] = None, title: Optional[str] = None) -> plt.Figure:
         """
         Plots the returns distribution indicating the VaR and CVaR thresholds </p>
         ret (np.ndarray): 1-Dimensional portfolio return series </p>
         bins (int): number of histogram bins </p>
+        capital (float, optional): symbolic capital used to add a secondary monetary axis
+            (top x-axis) and monetary amounts in the VaR/CVaR labels; omit to keep everything
+            in returns </p>
+        title (str, optional): overrides the default axes title (e.g. to identify the portfolio) </p>
         Returns the matplotlib Figure
         """
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -222,13 +238,22 @@ class CVaR(VaR):
             cvar = self(ret)
             ax.plot(x, norm.pdf(x, mu, sigma), color="black", linewidth=1.5, linestyle="--", label="Normal ajustada")
 
-        ax.axvspan(ax.get_xlim()[0], var, color="red", alpha=0.15, label="Cauda (≤ VaR)")
-        ax.axvline(var, color="red", linestyle="--", linewidth=2, label=f"VaR ({self.alpha:.0%}) = {var:.4f}")
-        ax.axvline(cvar, color="darkred", linestyle="-", linewidth=2, label=f"CVaR ({self.alpha:.0%}) = {cvar:.4f}")
+        var_label = f"VaR ({self.alpha:.0%}) = {var:.2%}"
+        cvar_label = f"CVaR ({self.alpha:.0%}) = {cvar:.2%}"
+        if capital is not None:
+            var_label += f" (R$ {var * capital:,.2f})"
+            cvar_label += f" (R$ {cvar * capital:,.2f})"
 
-        ax.set_title(f"Distribuição de retornos, VaR e CVaR ({self.type})")
+        ax.axvspan(ax.get_xlim()[0], var, color="red", alpha=0.15, label="Cauda (≤ VaR)")
+        ax.axvline(var, color="red", linestyle="--", linewidth=2, label=var_label)
+        ax.axvline(cvar, color="darkred", linestyle="-", linewidth=2, label=cvar_label)
+
+        ax.set_title(title or f"Distribuição de retornos, VaR e CVaR ({self.type})")
         ax.set_xlabel("Retorno")
         ax.set_ylabel("Densidade")
+        if capital is not None:
+            money_axis = ax.secondary_xaxis("top", functions=(lambda x: x * capital, lambda x: x / capital))
+            money_axis.set_xlabel(f"Resultado sobre capital de R$ {capital:,.2f}")
         ax.legend(loc="upper left", fontsize="small")
         fig.tight_layout()
         return fig
@@ -243,7 +268,7 @@ class CVaR(VaR):
             var, mu, sigma = self._VaR(ret)
             z_alpha = norm.ppf(self.alpha)
             phi_z = norm.pdf(z_alpha)  # densidade da normal padrão em z_alpha
-            return mu - sigma * phi_z / (1 - self.alpha)
+            return mu - sigma * phi_z / self.alpha
         else:
             message = "no valid type was found therefore no calculation war returned"
             raise ValueError(message)
