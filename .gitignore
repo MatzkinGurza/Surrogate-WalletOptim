@@ -24,13 +24,38 @@ Outputs/logs/
 
 # Notebooks
 .ipynb_checkpoints/
-Tests/
-Test/
-tests/
-test/
+# Tests/
+# Test/
+# tests/
+# test/
 
 # Editor / SO
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Monografia (LaTeX) - artefatos de compilacao e PDF gerado
+Monografia/*.pdf
+Monografia/*.aux
+Monografia/*.log
+Monografia/*.toc
+Monografia/*.out
+Monografia/*.bbl
+Monografia/*.blg
+Monografia/*.brf
+Monografia/*.fdb_latexmk
+Monografia/*.fls
+Monografia/*.synctex.gz
+Monografia/*.lof
+Monografia/*.lot
+Monografia/*.lol
+Monografia/*.idx
+Monografia/*.ilg
+Monografia/*.ind
+Monografia/*.nav
+Monografia/*.snm
+Monografia/*.vrb
+Monografia/*.run.xml
+Monografia/*-blx.bib
+Monografia/*.bcf
