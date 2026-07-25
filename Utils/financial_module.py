@@ -33,6 +33,11 @@ class StockPortfolio:
     
     def num_assets(self):
         return len(self.stocks)
+    
+    def __repr__(self):
+        return f"<Object: Dataclass StockPortfolio> (n_assets={self.num_assets} tickers={self.stocks})"
+
+
 
 
 

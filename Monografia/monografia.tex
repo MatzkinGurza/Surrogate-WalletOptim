@@ -28,6 +28,8 @@
 \usepackage{tocloft}
 \usepackage{float}
 \usepackage{caption}
+\usepackage{multirow}
+
 
 % ---------------------------------------------------------------
 %  CONFIGURAÇÕES DE ESPAÇAMENTO E FONTE
@@ -494,11 +496,107 @@ Para construir um modelo substituto do desempenho das carteiras é preciso prime
 
 Duas técnicas são particularmente úteis. A amostragem por\textit{ Latin Hypercube Sampling}, ou LHS, proposta por \citeonline{mckay1979comparison} e revisada por \citeonline{viana2016tutorial}, divide cada dimensão do problema em faixas de igual probabilidade e garante exatamente um ponto por faixa em cada eixo, assegurando boa cobertura marginal. As sequências de Sobol, por sua vez, são sequências de baixa discrepância que preenchem o espaço de maneira muito uniforme, onde a discrepância mede quão irregular é o espalhamento dos pontos. \citeonline{saltelli2015exploring} comparam essas técnicas em espaços de alta dimensão, identificando que as sequências de Sobol passam a compensar como escolha quando a dimensionalidade do problema aumenta significativamente.
 
-Ainda acerca do espaço de amostragem, um detalhe geométrico é decisivo neste problema. O espaço das carteiras não é um cubo livre. Como os pesos precisam somar a unidade e são não negativos, o espaço válido é restrito. Com dois ativos, os pesos vivem sobre um segmento de reta; com três, sobre um triângulo; em geral, sobre a figura chamada simplex. Formalmente,
+Cada técnica segue seu próprio procedimento de exploração inicial do espaço, e ambas são importantes dado o objetivo de 
+reconstruir uma superfície aproximada da função objetivo. Dado isso, é importante entender como esses algoritmos de definição de pontos amostrais
+funcionam e, consequentemente, como será definida uma primeira superfície aproximada sobre a qual algoritmos de otimização podem começar a buscar as regiões nas quais 
+se aprofundar, procurando o mínimo ou máximo global. Um bom ponto de partida é abordar um exemplo em duas dimensões.
+
+Começando pelo LHS, pode-se imaginar um domínio $[0,1]^d$ com $d=2$, ou seja, algo similar a um problema de dois ativos e portanto dois pesos entre zero e um. Nesse dominio, busca-se extrair, arbitrariamente, $n=5$ pontos amostrais. 
+Segundo o algoritmo do LHS simples devemos dividir nossas dimensões amostrais de forma uniforme, tal que cada dimensão $d$ seja dividida em $n$ intervalos. Assim:
+$$ d=1,2 \quad \rightarrow \quad [0.0, 0.2]; [0.2, 0.4]; [0.4, 0.6]; [0.6, 0.8]; [0.8, 1.0] $$
+Cada intervalo corresponde a uma posição de $i=1$ a $i=n=5$ e, para produzir o espalhamento nas amostras, é necessário permutar esses intervalos para as dimensões $d$. Dessa forma, $x_{1,i} \in d=1$ e $x_{2,i} \in d=2$ são combinados de forma aleatória nos intervalos mas garantindo apenas uma amostra por faixa definida. As permutações podem ser definidas, por exemplo, como:
+$$ \pi_1 = (1, 4, 2, 5, 3) \qquad \pi_2 = (4, 3, 5, 2, 1) $$ 
+Tal que o ponto amostral $p_i = (x_{1,i} \quad x_{2,i})$ pode ser obtido por:
+$$p_i = \bigg ( \frac{\pi_1(i) - 1 + \mathrm{u}_{1,i}}{n} \quad \frac{\pi_2(i) - 1 + \mathrm{u}_{2,i}}{n} \bigg ) \qquad \mathrm{u}_{j,i} \in [0, 1]$$
+onde o termo $x_{j,i}$ ao ser dividido por $n=5$ nos retorna o extremo final de cada intervalo $i$; o $-1$ traz o valor para o extremo esquerdo do intervalo e, quando somado a $\mathrm{u}_{j,i}$, define um valor intermediário para a coordenada $j$ da amostra. 
+Assim encontram-se todos os pontos amostrais ($p_i$ para $i= 1, 2... 5$). 
+
+Essa definição algoritmica da amostragem por LHS é útil pois pode ser expandida para $d>2$ dimensões facilmente, lidando naturalmente com a restrição individual do intervalo de cada parâmetro de entrada. No entanto, quando se trata de uma carteira de ativos, a restrição de que a soma dos pesos deve ser igual a um causa um problema com relação à abordagem direta traçada acima. Essa questão sera discutida mais adiante, após abordar o método das sequências de Sobol.
+
+Vale notar que a construção descrita corresponde ao LHS em sua forma simples, na qual as permutações são sorteadas sem nenhum critério adicional. Como o método controla apenas o preenchimento de cada faixa unidimensional, é possível que um sorteio particular alinhe os pontos de forma indesejada, por exemplo aproximando-os de uma diagonal e deixando grandes regiões do domínio descobertas. Uma variante que corrige esse comportamento é o LHS com critério maximin, que gera vários planos amostrais candidatos e seleciona aquele que maximiza a menor distância entre pares de pontos:
+$$ \max_{\text{plano}} \; \min_{i \neq k} \; \lVert p_i - p_k \rVert $$
+Em termos práticos, a diferença é que o LHS simples produz um único conjunto a partir de uma permutação sorteada, ao passo que o maximin compara diversos conjuntos e escolhe o mais bem espalhado, reduzindo a chance de agrupamentos ou vazios no interior do domínio. O restante do procedimento permanece idêntico, de modo que a propriedade de uma amostra por faixa continua garantida.
+
+Passando às sequências de Sobol, a diferença fundamental em relação ao LHS está no fato de que os pontos não são sorteados a partir de permutações aleatórias, mas gerados de forma determinística por uma construção em base 2 (binária) que busca minimizar a discrepância, isto é, o quanto a distribuição das amostras se afasta de um preenchimento perfeitamente uniforme do domínio.
+
+A ideia por trás da formulação binária é a divisão sequencial do intervalo em duas partes. No primeiro nível, o intervalo $[0,1]$ é dividido ao meio; no segundo, cada metade é novamente dividida, gerando quartos; no terceiro, cada quarto vira um oitavo, e assim por diante. Quanto mais subdivisões são realizadas, mais granular fica a partição do espaço, e é justamente essa granularidade crescente que permite posicionar novos pontos nas lacunas deixadas pelos anteriores.
+
+Mantendo o mesmo domínio $[0,1]^d$ com $d=2$ e $n=5$  amostras, a construção parte de números direcionais $v_k$, que representam essas subdivisões com uma determinada profundidade e precisão. Cada $v_k$ é uma fração da forma
+$ v_k = m_k/2^k $.
+Escrever essa fração em base 2 torna seu papel mais claro: um número como $0.1_2$ vale $1/2$, $0.01_2$ vale $1/4$, $0.11_2$ vale $3/4$, e assim por diante, de modo que cada casa binária após a vírgula corresponde a um nível de subdivisão do intervalo. Nesse contexto, o denominador $2^k$ representa a subdivisão em partes cada vez menores, enquanto o índice $k$ indica o nível de refinamento binário, ou seja, a casa decimal em base 2 que aquele número direcional controla: $k=1$ atua na primeira casa (metades), $k=2$ na segunda (quartos), $k=3$ na terceira (oitavos). O numerador $m_k$, por sua vez, é um inteiro ímpar que define qual posição dentro daquela resolução o número direcional aponta; a exigência de que seja ímpar garante que a fração não se reduza a um nível de refinamento binário anterior e, portanto, que cada $v_k$ acrescente informação nova. Os valores de $m_k$ são fixados por uma fórmula de recorrência associada a um polinômio primitivo definido dado para cada dimensão. Esse polinômio faz com que o conjunto de números direcionais seja uma característica exclusiva de cada dimensão e, portanto, eixo.
+
+Para o exemplo em duas dimensões, os primeiros números direcionais de cada eixo são apresentados na Tabela~\ref{tab:direction}. Na primeira dimensão, todos os $m_k$ valem $1$; enquanto, na segunda, valem $1$, $3$ e $7$, valores provenientes do polinômio primitivo.
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{c c c c c}
+        \hline
+        \toprule
+        Dimensão & Nível $k$ & $m_k$ & $v_k = m_k/2^k$ & Representação binária \\
+        \hline
+        \toprule
+        \multirow{3}{*}{$1$} & $1$ & $1$ & $1/2 = 0.500$ & $0.1_2$ \\
+                             & $2$ & $1$ & $1/4 = 0.250$ & $0.01_2$ \\
+                             & $3$ & $1$ & $1/8 = 0.125$ & $0.001_2$ \\
+        \hline
+        \midrule
+        \multirow{3}{*}{$2$} & $1$ & $1$ & $1/2 = 0.500$ & $0.1_2$ \\
+                             & $2$ & $3$ & $3/4 = 0.750$ & $0.11_2$ \\
+                             & $3$ & $7$ & $7/8 = 0.875$ & $0.111_2$ \\
+        \hline
+        \midrule
+    \end{tabular}
+    \caption{Números direcionais das duas dimensões, calculados até o nível $k=3$.}
+    \label{tab:direction}
+\end{table}
+
+A tabela foi calculada até $k=3$ porque três níveis de refinamento bastam para posicionar com exatidão os primeiros pontos da sequência: com $k$ até $3$ o intervalo é dividido em até oito partes, o que cobre todos os pontos até $i=7$. De forma geral, o número de níveis necessário acompanha a quantidade de amostras desejada, pois cada nível adicional dobra a resolução disponível; para gerar $n$ pontos, basta dispor de números direcionais até o nível $k$ tal que $2^k \geq n$.
+
+Definidos os números direcionais, a coordenada de cada ponto é obtida combinando-os por meio do operador $\oplus$, que denota a soma bit a bit módulo 2, também chamada de "ou exclusivo" (XOR). O índice $i$ do ponto é escrito em binário começando do 0, e com o número de casas equivalente ao $k$ máximo ($k=3$ no exemplo); nesse caso, então, $i_{inicial} = 000$. Cada bit ativo seleciona o número direcional do nível correspondente para entrar na soma XOR bit a bit.
+
+O efeito dessa combinação é acumular as subdivisões indicadas pelos bits do índice: um bit no primeiro nível desloca o ponto por uma metade, um bit no segundo nível o ajusta por um quarto, e assim por diante. Como o XOR opera casa a casa sem propagar "vai um", cada bit de $i$ atua de forma independente sobre a casa binária correspondente da coordenada, o que faz com que índices consecutivos ocupem posições sistematicamente complementares. É esse mecanismo que minimiza a discrepância: em vez de acumular pontos numa mesma região, a construção garante que, ao completar blocos de $2^k$ pontos, o domínio esteja dividido em $2^k$ células de igual tamanho com exatamente uma amostra em cada.
+
+Aplicando a regra a partir de $i=0$, obtêm-se os primeiros pontos. Para $i=0$ (binário $000$), nenhum bit está ativo, e o ponto fica na origem, $(0.000,\ 0.000)$. Para $i=1$ (binário $001$), o bit do primeiro nível está ativo, de modo que a coordenada usa $v_1$ em cada dimensão: como $m_1=1$, o ponto corta o espaço no meio em cada eixo, resultando em $(0.500,\ 0.500)$. Para $i=2$ (binário $010$), ativa-se o segundo nível: na primeira dimensão $v_2 = 1/4 = 0.250$ e na segunda $v_2 = 3/4 = 0.750$, resultando em $(0.250,\ 0.750)$, ou seja, o ponto é posicionado dentro de um quarto do intervalo, refinando a partição feita no passo anterior. Para $i=3$ (binário $011$), os dois primeiros níveis estão ativos e é preciso somar $v_1 \oplus v_2$ em cada dimensão. Na primeira, $0.1_2 \oplus 0.01_2 = 0.11_2 = 0.750$; na segunda, $0.1_2 \oplus 0.11_2 = 0.01_2 = 0.250$, resultando em $(0.750,\ 0.250)$. Para $i=4$ (binário $100$), apenas o terceiro nível está ativo, o que traz $v_3$ em cada eixo: $0.125$ na primeira dimensão e $0.875$ na segunda, resultando em $(0.125,\ 0.875)$ e iniciando um refinamento em oitavos.
+
+Reunindo os primeiros cinco pontos, a sequência de Sobol produz $(0.000,\ 0.000)$, $(0.500,\ 0.500)$, $(0.250,\ 0.750)$, $(0.750,\ 0.250)$ e $(0.125,\ 0.875)$. O padrão revela a lógica do método e o efeito prático das definições apresentadas: os primeiros pontos dividem o quadrado ao meio, e os seguintes preenchem progressivamente as regiões ainda vazias, refinando a cobertura à medida que mais amostras são acrescentadas. Cada nível de refinamento $k$ entra em ação quando o índice $i$ alcança o bit correspondente, o que explica por que a sequência passa naturalmente de metades para quartos e destes para oitavos. Essa propriedade sequencial é particularmente conveniente no contexto da otimização bayesiana, pois permite ampliar o conjunto amostral sem recomeçar o processo, mantendo a boa distribuição do conjunto completo.
+
+Com os dois métodos aplicados ao mesmo problema exemplar, a Figura~\ref{fig:comp_lhs_sobol} compara os cinco pontos gerados por cada abordagem. No LHS, a grade evidencia as cinco faixas em que cada eixo foi dividido, e verifica-se que cada faixa de cada dimensão é ocupada por exatamente um ponto, o que assegura boa cobertura das margens de cada parâmetro isoladamente. No Sobol, a linha tracejada em $0.5$ destaca a divisão binária que orienta a construção: o segundo ponto ocupa o centro, e os demais se distribuem pelos quadrantes ainda descobertos.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\textwidth]{images/comp_lhs_sobol.png}
+    \caption{Comparação entre os cinco pontos amostrais obtidos por LHS (esquerda) e pelos primeiros cinco pontos da sequência de Sobol (direita) no domínio $[0,1]^2$.}
+    \label{fig:comp_lhs_sobol}
+\end{figure}
+
+A distinção prática entre as duas técnicas aparece quando se observa a distribuição conjunta das amostras. O LHS garante que cada faixa unidimensional seja preenchida uma única vez, mas não exerce controle sobre o espaçamento dos pontos quando as dimensões são consideradas em conjunto, o que pode deixar agrupamentos ou vazios no interior do domínio, limitação que motiva variantes como o maximin discutido anteriormente. O Sobol, por construção, busca a uniformidade também nas projeções de dimensão superior, o que tende a produzir um preenchimento mais regular. Essa vantagem se acentua à medida que o número de dimensões cresce, motivo pelo qual o Sobol costuma ser preferido em problemas com muitos parâmetros de entrada. 
+Analisando a Figura \ref{fig:comp_lhs_sobol}, nota-se que a distribuição de Sobol preenche o espaço de forma mais sitemática e entende-se que os espaços vazios deixados são consequência do número reduzido de pontos amostrais. Por outro lado, a abordagem por LHS gera um conjunto no qual os espaços vazios são consequência da estocasticidade associada à permutação realizada durante seu cálculo.
+
+Retomando a questão levantada ao final da apresentação do LHS, ambas as construções descritas até aqui pressupõem que cada parâmetro varia livremente dentro do seu intervalo, de forma independente dos demais. Essa hipótese é adequada quando se amostram hiperparâmetros soltos, mas deixa de valer no caso de uma carteira de ativos. Ao tratar os pesos $w_i$ como coordenadas do espaço amostral, surge a restrição $\sum_i w_i = 1$. Um ponto gerado diretamente por LHS ou Sobol no cubo $[0,1]^d$ dificilmente satisfaz essa igualdade, de modo que a amostragem no cubo, tomada isoladamente, não produz carteiras válidas. A amostragem, portanto, não deve recair sobre um cubo livre e sim sobre uma figura geométrica denominda simplex, definida formalmente como:
 \begin{equation}
 \Delta^{n-1} = \Big\{ \mathbf{w} \in \mathbb{R}^n : w_i \geq 0, \ \textstyle\sum_{i=1}^{n} w_i = 1 \Big\}.
 \end{equation}
-No caso de três ativos, cada peso varia de $0$ a $1$, e a exigência de que os três somem exatamente $1$ elimina um grau de liberdade, recortando do cubo de possibilidades uma face triangular. Fixados dois pesos, o terceiro fica determinado por diferença, o que explica a redução de dimensão e o formato triangular. A consequência prática é que gerar pontos de Sobol ou LHS num cubo e depois apenas normalizá-los para que somem $1$ distorce o espalhamento, concentrando pontos artificialmente no centro do simplex e destruindo as boas propriedades de cobertura dessas técnicas. Considera-se então que o procedimento mais adequado é gerar os pontos já respeitando a geometria do simplex.
+
+Para tornar o efeito dessa restrição mais concreto em multiplas dimensões, convém passar ao caso de três ativos, com $d=3$ e pesos $w_1$, $w_2$ e $w_3$. O conjunto dos pontos que satisfazem simultaneamente $w_i \geq 0$ e $w_1 + w_2 + w_3 = 1$ não é o cubo $[0,1]^3$, mas apenas a fatia contida no plano definido por essa igualdade. Essa fatia é um triângulo (um simplex para o caso com $n=3$ dimensões) cujos vértices são $(1,0,0)$, $(0,1,0)$ e $(0,0,1)$, isto é, as três carteiras que concentram todo o capital em um único ativo. Qualquer carteira admissível de três ativos corresponde a um ponto sobre esse triângulo, e o problema de amostragem passa a ser o de distribuir pontos de maneira uniforme sobre ele, e não sobre o volume do cubo.
+
+A Figura~\ref{fig:simplex} ilustra o simplex imerso no espaço tridimensional, com os pontos amostrais restritos ao plano $w_1 + w_2 + w_3 = 1$. Observa-se que, embora o espaço de partida seja o cubo unitário, o conjunto de carteiras válidas ocupa somente a superfície triangular que o atravessa, o que reduz a dimensionalidade efetiva do problema de três para dois graus de liberdade.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]{images/simplex_compare.png}
+    \caption{Amostragem sobre o simplex $w_1 + w_2 + w_3 = 1$ com $w_i \geq 0$. À esquerda, a normalização direta dos pontos do cubo concentra as amostras no centro do triângulo; à direita, a ordenação de cortes distribui as amostras de forma uniforme sobre toda a superfície.}
+    \label{fig:simplex}
+\end{figure}
+
+O modo como se leva uma amostragem do cubo para o simplex determina se a distribuição resultante é adequada ou enviesada. A abordagem imediata consiste em gerar os pontos por LHS ou Sobol no cubo e, em seguida, dividir cada vetor pela soma de suas coordenadas, forçando o resultado a somar um. Esse procedimento, ainda que satisfaça a restrição, não preserva a uniformidade: como a soma de coordenadas aproximadamente uniformes tende a se concentrar em torno de um valor central, a divisão empurra os pontos para o interior do triângulo, deixando as bordas e os vértices pouco representados. No contexto de portfólio, isso significaria testar quase sempre carteiras equilibradas e raramente carteiras concentradas em um ou dois ativos.
+
+Uma forma melhor de mapear as amostras para o simplex preservando a boa distribuição herdada do LHS ou do Sobol é utilizar os resultados das amostragens em $n-1$ dimensões (redução de uma dimensão devido à restrição do simplex) obtidas por esses métodos para posteriormente utilizá-las como cortes ordenados de um intervalo unitário. Ou seja, interpreta-se cada ponto amostrado no domínio $[0,1]^{n-1}$ como um conjunto de $n-1$ cortes sobre o um segmento de reta representativo do intervalo unitário. Assim, ordenando esses cortes e tomando as diferenças consecutivas, obtêm-se $n$ comprimentos que constituem os pesos amostrados. Dessa forma, para $n=3$, a partir de dois valores ordenados $u_{(1)} \leq u_{(2)}$:
+$$ w_1 = u_{(1)}, \qquad w_2 = u_{(2)} - u_{(1)}, \qquad w_3 = 1 - u_{(2)} $$
+Por construção, os pesos são não negativos e somam um, sem rejeição de pontos nem normalização por soma. Como a operação de ordenar e diferenciar é suave, o espalhamento dos cortes se traduz diretamente no espalhamento dos pesos, preservando a cobertura do amostrador de origem. A Figura~\ref{fig:simplex} contrasta as duas abordagens: no painel da esquerda, a normalização direta concentra as amostras no centro do triângulo; no painel da direita, a ordenação de cortes cobre o simplex de maneira uniforme. Dessa forma, é possível conciliar as propriedades desejáveis das sequências amostrais com a restrição estrutural imposta pela composição de uma carteira, garantindo que a superfície aproximada da função objetivo seja construída sobre um conjunto de carteiras representativo de todo o espaço admissível.
+
+
+
+
 
 \subsection{Modelos substitutos e otimização bayesiana}
 \label{sub:surrogate}
