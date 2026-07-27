@@ -237,7 +237,7 @@ Este projeto se posiciona na discussão de como selecionar eficientemente um por
 
 \subsection{Objetivo}
 
-O objetivo principal do projeto é aplicar e compreender técnicas de otimização não linear no contexto da seleção de carteira, construindo e validando um \textit{pipeline} completo que vai da coleta de dados de preços à recomendação de uma carteira. A otimização é conduzida por otimização bayesiana apoiada em um \textit{surrogate model}, e a função objetivo otimizada é o Valor-em-Risco Condicional (CVaR) da carteira.
+O objetivo principal do projeto é aplicar e compreender técnicas de otimização não linear no contexto da seleção de carteira, construindo e validando um \textit{pipeline} completo que vai da coleta de dados de preços à recomendação de uma carteira. A otimização é conduzida pelo método bayesiano apoiado em um \textit{surrogate model} cujo estado inicial é obtido por meio de um projeto preliminar de experimentos (DoE), e a função objetivo otimizada é baseada no Valor-em-Risco Condicional (CVaR) da carteira.
 
 O produto esperado é o \textit{pipeline} funcional e a análise de ao menos uma carteira ótima obtida por ele, para um conjunto pré-definido de ações da bolsa americana, acessível pelo \textit{Yahoo Finance}. O critério de validação é o desempenho da carteira fora da amostra, calculado ao otimizar a relação de retorno e risco em um período e testar a carteira resultante em um período seguinte, cujo resultado já é conhecido. Esse critério é então comparado ao desempenho do método de Média-Variância (controle), elaborado por Markowitz, cujo desempenho e funcionamento já é bem conhecido no campo.
 
@@ -273,6 +273,7 @@ onde $\mathbf{w} = (w_1, \dots, w_n)^\top$ e $\mathbf{R} = (R_1, \dots, R_n)^\to
 
 
 \subsection{Retorno esperado}
+\label{sec: retorno esperado}
 
 O retorno esperado $\boldsymbol{\mu}$ é a melhor estimativa de quanto cada ativo renderá no futuro, sendo essencial para a tomada de decisão acerca da composição de uma carteira. Veja na equação \ref{eq ret esperado}
 \begin{equation}
@@ -282,7 +283,7 @@ O retorno esperado $\boldsymbol{\mu}$ é a melhor estimativa de quanto cada ativ
 
 A forma mais direta de estimar $\boldsymbol{\mu}$ é usando a média dos retornos passados \cite{markowitz1952portfolio}. No entanto, estimar retornos futuros a partir da média de retornos passado é particularmente instável \cite{fisher1935design}. Este é o ponto mais delicado de toda a construção. A estimativa do retorno esperado a partir do histórico é imprecisa, e sua imprecisão decresce lentamente com o tamanho da amostra, ao passo que a estimativa da volatilidade e covariância, discutida a seguir, converge de forma mais rápida. Em outras palavras, com uma amostra limitada é fácil aproximar o risco de um ativo, mas difícil estimar o seu retorno futuro \cite{fisher1935design}. 
 
-Como a carteira ótima de média-variância \cite{markowitz1952portfolio} é muito sensível a $\boldsymbol{\mu}$, carteiras calculadas com médias históricas cruas costumam ser instáveis, concentradas em poucos ativos e decepcionantes fora da amostra usada para estimar a média de retorno. Essa fragilidade é discutida ao longo de todo o projeto e motiva a escolha de uma função objetivo simples e consolidada, discutida na Subseção~\ref{sub:objetivos}.
+Como a carteira ótima de média-variância \cite{markowitz1952portfolio} é muito sensível a $\boldsymbol{\mu}$, carteiras calculadas com médias históricas cruas costumam ser instáveis, concentradas em poucos ativos e decepcionantes fora da amostra usada para estimar a média de retorno. Essa fragilidade é discutida ao longo do projeto e uma forma de tratá-la é abordada na seção \ref{sec: CAPM}.
 
 \subsection{Variância, Volatilidade e Risco das Ações}
 
@@ -292,7 +293,7 @@ O risco de um ativo mede quão incerto é seu retorno. Essa incerteza tem uma li
 \end{equation}
 A raiz quadrada da variância é o desvio padrão $\sigma_i$, chamado de volatilidade no mercado financeiro. Variância alta significa retorno imprevisível, e é essa imprevisibilidade que pode ser traduzida como risco. Resumindo, ações mais voláteis são mais arriscadas.
 
-\subsection{Covariância, Diversificação e Risco da Carteira}
+\subsection{Covariância e Diversificação}
 
 A covariância é um conceito central da teoria de portfólios. Ela mede se dois ativos tendem a se mover juntos, em direções opostas ou de forma independente. De forma geral, ela calcula se o desvio do retorno $R_i$ de uma ação $A$ com relação à sua média  $\mu_i$ e o desvio do retorno $R_j$ de uma ação $B$ com relação à sua média $\mu_j$ ocorrem em sintonia (resultado positivo) ou em oposição (resultado negativo) \cite{markowitz1952portfolio}.
 \begin{equation}
@@ -307,44 +308,68 @@ Reunindo todas as covariâncias na matriz $\boldsymbol{\Sigma}$, de elemento gen
 \label{eq:varport}
 \end{equation}
 
-A Equação~\eqref{eq:varport} justifica matematicamente a diversificação e é a razão pela qual toda a teoria de portfólios foi elaborada. O risco da carteira não é a média dos riscos individuais: ele depende crucialmente dos termos cruzados $w_i w_j \sigma_{ij}$ referentes a duas diferentes ações e a a forma como variam uma em relação à outra. Quando dois ativos têm covariância baixa ou negativa, suas oscilações se cancelam parcialmente, e a variância do conjunto fica abaixo da média ponderada das variâncias individuais. É possível, assim, montar uma carteira menos arriscada que qualquer um de seus ativos isolados, sem sacrificar o retorno médio. A consequência prática direta para este projeto é que o objetivo a ser otimizado deve ser sempre definido no nível da carteira inteira, pois é a interação entre ativos, capturada por $\boldsymbol{\Sigma}$, que determina a qualidade do conjunto \cite{markowitz1952portfolio}.
+A Equação~\eqref{eq:varport} justifica matematicamente a diversificação e é a razão pela qual toda a teoria de portfólios de \citeonline{markowitz1952portfolio} foi elaborada. O risco da carteira, na formulação de Markowitz, não é a média dos riscos individuais: ele depende crucialmente dos termos cruzados $w_i w_j \sigma_{ij}$ referentes a duas diferentes ações e a a forma como variam uma em relação à outra. Quando dois ativos têm covariância baixa ou negativa, suas oscilações se cancelam parcialmente, e a variância do conjunto fica abaixo da média ponderada das variâncias individuais. É possível, assim, montar uma carteira menos arriscada que qualquer um de seus ativos isolados, sem sacrificar o retorno médio. 
 
-\subsection{Abordagem média-variância e a fronteira eficiente}
+A consequência direta dessa descoberta é a conclusão lógica de que, ao analisar o retorno e risco no nível de portfólio, é possível, definindo uma medida de risco adequada, encontrar uma configuração de carteira que minimize o risco assumido para um dado nível de retorno aproveitando-se da interação entre os diversos ativos. Assim, as seções a seguir discutirão justamente estudos acerca de alguns dos principais métodos para a quantificação de risco e retorno e de como realizar a otimização de um portfólio.
+
+\subsection{Medidas de Risco}
+
+Entende-se do exposto até o momento que o cerne da questão de como diversificar eficientemente um portfólio é a identificação do risco das diferentes combinações de pesos e a sua minimização.
+Para conseguir minimizar esse risco é necessário então definí-lo como uma função $\mathrm{Risco}(\mathbf{w})$ a ser otimizada. 
+\citeonline{markowitz1952portfolio}, foi quem notou que isso poderia ser feito por meio da minimização da covariância ponderada pelos pesos dos ativos, no entanto, estudos posteriores apontaram alternativas para lidar com problemas encontrados em sua formulação. 
+
+Nesta seção serão abordadas as duas medidas de risco e os problemas de otimização associados a elas; 
+primeiro a elaborada por Markowitz em 1952 (média-variância), por sua relevância ao campo; e em seguida o \textit{Conditional Value-at-Risk} (CVaR), em português, Valor-em-Risco Condicional, por ser a métrica principal a ser utilizada no projeto.
+
+\subsubsection{Média-Variância}
 \label{sec: med var}
 
-Reunindo os elementos anteriores, a seleção de portfólio proposta por Markowitz (1952) pode ser escrita como um problema de otimização. Veja a seguir uma formulação comum que minimiza o risco sujeito a um retorno alvo $\mu^\ast$:
+Reunindo os elementos tratados anteriormente, 
+a seleção de portfólio proposta por Markowitz (1952) 
+pode ser escrita como um problema de otimização do risco representado pela variância da carteira. 
+Veja a seguir uma formulação comum que minimiza o risco sujeito a um retorno alvo $\mu^\ast$:
 \begin{equation}
 \min_{\mathbf{w}} \ \mathbf{w}^\top \boldsymbol{\Sigma} \mathbf{w}
 \quad \text{sujeito a} \quad
 \mathbf{w}^\top \boldsymbol{\mu} = \mu^\ast, \quad \mathbf{w}^\top \mathbf{1} = 1.
 \label{eq:markowitz}
 \end{equation}
-Entende-se da formulação de Markowitz (média-variância), que para evitar altos riscos na carteira devemos reduzir a volatilidade conjunta dela, e que isso pode ser feito minimizando a covariância ponderada pelos pesos cruzados entre os ativos nela. Considera-se também que essa minimização esta sujeita a um objetivo de retorno, e que variando esse alvo $\mu^\ast$, o conjunto de soluções descreve uma fronteira contendo a carteira menos arriscada para o retorno desejado, essa curva é chamada de fronteira eficiente do plano de risco-retorno definido. Em outras palavras, cada ponto da fronteira é a carteira de menor variância para aquele nível de retorno. A escolha do portfólio final depende da tolerância ao risco do investidor.
+Entende-se da formulação de Markowitz (média-variância), que para evitar altos riscos na carteira devemos reduzir a volatilidade conjunta dela, 
+e que isso pode ser feito minimizando a covariância ponderada pelos pesos cruzados entre os ativos nela. 
 
-\subsection{Funções objetivo e a estimativa do retorno esperado}
-\label{sub:objetivos}
+Considera-se também que essa minimização esta sujeita a um objetivo de retorno, isso porque a minimização exclusiva do risco não nos garante nada sobre o seu retorno associado. Assim, o problema de otimização envolve também essa restrição responsável por delimitar o campo de riscos encontrados a um mesmo resultado de retorno. Por isso, entende-se que variando esse alvo $\mu^\ast$, 
+o conjunto de soluções encontradas descreve uma fronteira contendo a carteira menos arriscada para a restrição desejada, sendo assim a carteira ideal para o nível de retorno escolhido. Varrendo todos os possíveis retornos esperados gera-se uma curva com os menores riscos para cada um deles. Essa curva é chamada de fronteira eficiente do plano de risco-retorno definido. Em outras palavras, cada ponto da fronteira é a carteira de menor variância para aquele nível de retorno. A escolha do portfólio final depende da tolerância ao risco do investidor.
 
-A formulação de média-variância, apresentada anteriormente, define o compromisso entre risco e retorno, mas deixa duas perguntas em aberto. A primeira é como transformar esse compromisso em um único número a ser otimizado, já que risco e retorno por si só não indicam qual carteira escolher sem antes fixar um dos dois como restrição. A segunda, mais grave, decorre de um problema já mencionado na Subseção~\ref{sec:fundamentacao}: a equação~\eqref{eq:markowitz} trata $\boldsymbol{\mu}$ como se fosse um valor certo e conhecido, quando na prática é apenas uma estimativa ruidosa. Como os pesos ótimos resultam de uma otimização em que o retorno entra de forma direta e a estimativa de $\boldsymbol{\mu}$ pode variar bastante de uma amostra para outra, pequenas mudanças na estimativa do retorno esperado podem levar a mudanças bruscas na composição da carteira ótima, sobretudo quando os ativos são muito correlacionados entre si. Esse é o problema de fundo que gerou grande parte dos desenvolvimentos posteriores a Markowitz.
+Compreendido o funcionamento da abordagem proposto por \citeonline{markowitz1952portfolio} é importante ressaltar alguns problemas presentes nela. A formulação possui 3 principais pontos negativos: 
+\begin{itemize}
+  \item \textbf{Simetria Indesejada:} A variância penaliza desvios indiscriminadamente, considerando movimentos positivos e negativos causados por volatilidade como sendo igualmente ruins. 
+  Esta penalização não faz sentido para o investidor. Uma carteira com muitos retornos excepcionalmente altos pode ser rotulada como "arriscada" pela variância mesmo que ela nunca produza perdas relevantes.
+  \item \textbf{Suposição de Normalidade:} O método considera que é possível descrever o comportamento de retornos apenas com média e variância, o que é válido apenas quando a distribuição de retornos é uma normal. 
+  Distribuições de retornos em ativos reais podem possuir caudas pesadas e desviar significativamente da normal, concentrando nos extremos justamente o risco que média e variância deixam de capturar.
+  \item \textbf{Sensibilidade aos Parâmetros Estimados:} A otimização recebe como entrada os retornos esperados e a matriz de covariância, que são estimativas sujeitas a erro, mas os trata como valores exatos. 
+  Isso tende a concentrar peso nos ativos cujos retornos foram superestimados por acaso, produzindo carteiras instáveis e pouco diversificadas que se alteram de forma brusca diante de pequenas variações nos dados. Uma mudança de amostra inicial pode reconfigura significatvamente a carteira selecionada.
+\end{itemize}
 
-As três extensões apresentadas nesta subseção respondem, cada uma à sua maneira, a essas duas perguntas. O índice de Sharpe e o CVaR são duas formas diferentes de resumir risco e retorno em um único objetivo, cada uma adequada a um tipo de comportamento dos dados. O CAPM, por sua vez, ataca diretamente o problema da estimativa de $\boldsymbol{\mu}$, ancorando o retorno esperado em um ponto de equilíbrio de mercado em vez de depender apenas da média histórica de cada ativo. Tratamentos mais elaborados dessa incerteza, de natureza bayesiana, existem na literatura e são retomados nas conclusões desta seção como estado da arte, mas ficam fora do escopo deste trabalho.
 
-\subsubsection{Índice de Sharpe}
-\label{sec: sharpe}
-
-Uma forma direta de resumir risco e retorno em um único número é o índice de Sharpe, que mede quanto uma carteira é rentável acima de um ativo sem risco, quantificando quanto se ganha a mais que esse ativo por unidade de risco assumido \cite{sharpe1994sharpe}:
-\begin{equation}
-S_p = \frac{\mathbf{w}^\top \boldsymbol{\mu} - r_f}{\sqrt{\mathbf{w}^\top \boldsymbol{\Sigma} \mathbf{w}}},
-\label{eq:sharpe}
-\end{equation}
-em que $r_f$ é o retorno do ativo sem risco, tipicamente um título público de curto prazo. Um Sharpe alto indica muito retorno por pouco risco. A Equação~\eqref{eq:sharpe} usa a variância completa da carteira, incorporando a covariância pelo termo $\mathbf{w}^\top \boldsymbol{\Sigma} \mathbf{w}$.
-
-O índice de Sharpe carrega, no entanto, uma suposição implícita: a de que a distribuição dos retornos da carteira é aproximadamente normal, ou seja, que ela fica inteiramente descrita por apenas dois números, a média e o desvio padrão. Por conta dessa suposição, dois desvios de mesma magnitude, um para cima e outro para baixo, são igualmente prováveis e igualmente penalizados pela variância. Essa suposição é conveniente, mas nem sempre corresponde ao comportamento real dos retornos de ações, e nem à penalização que desejamos aplicar ao problema, dado que um desvio para cima e relação ao retorno médio é positivo e um para baixo é negativo, como discutido a seguir \cite{fabozzi2008portfolio}.
 
 \subsubsection{CVaR}
 
-Os retornos de ativos financeiros costumam apresentar dois comportamentos que fogem da distribuição normal, e por isso estão desalinhados com as suposições do índice de Sharpe. O primeiro é a presença de caudas pesadas: quedas e altas muito grandes acontecem com uma frequência maior do que uma distribuição normal preveria. Na prática, isso significa que eventos que a normal trataria como praticamente impossíveis, como uma queda de vários desvios padrão em um único dia, ocorrem no mercado real com uma frequência bem maior do que essa suposição sugere. O segundo é a assimetria: os movimentos de queda tendem a ser mais abruptos e mais frequentes do que movimentos de alta de magnitude equivalente. A consequência prática dessas duas características é que se as desconsiderarmos iremos penalizar de forma incoerente os riscos observados por meio da série temporal do preço da carteira de ações \cite{fabozzi2008portfolio, rockafellar2000optimization}. 
+Os retornos de ativos financeiros costumam apresentar dois comportamentos que fogem 
+da distribuição normal, e por isso estão desalinhados com as suposições da formulação de média-variância, como citado anteriormente. 
+O primeiro é a presença de caudas pesadas: quedas e altas muito grandes acontecem com uma frequência 
+maior do que uma distribuição normal preveria. Na prática, isso significa que eventos que a normal 
+trataria como praticamente impossíveis, como uma queda de vários desvios padrão em um único dia, 
+ocorrem no mercado real com uma frequência bem maior do que essa suposição sugere. O segundo é a 
+assimetria: os movimentos de queda podem ser mais abruptos e mais frequentes do que movimentos de 
+alta de magnitude equivalente. A consequência prática dessas duas características é que se as 
+desconsiderarmos iremos penalizar de forma incoerente os riscos observados por meio da série temporal 
+do preço da carteira de ações \cite{fabozzi2008portfolio, rockafellar2000optimization}. 
 
-Sendo assim, este problema aparece no índice de Sharpe ao passo que a variância, usada nele, penaliza da mesma forma um desvio para cima e um desvio para baixo, quando na realidade o investidor só se importa com o desvio para baixo. Duas carteiras podem ter o mesmo índice de Sharpe e, ainda assim, exposições muito diferentes a perdas grandes, se uma delas tiver retornos com cauda mais pesada do que a outra. Tendo em vista esse problema, novas funções objetivo foram definidas para evitar essa premissa de simetria indesejável, como por exemplo o VaR\footnote{O VaR, precursor e base fundamental para a criação do CVaR, quantifica a perda máxima a um determinado nível de confiança $\alpha$. Foi substituído pelo CVaR por ignorar a magnitude das perdas associadas ao peso da cauda (risco de cauda) e por não ter a propriedade de subaditividade \cite{barrosa2015aplicacao}.} e o CVaR. Ambas as funções estão exemplificadas de forma ilustrativa na figura \ref{fig:cvar_var}, onde VaR e CVaR são identificados justamente em um caso onde as premissas de normalidade (curva pontilhada) e simetria, causariam problemas para outras funções objetivo. 
+Além dessa questão da suposição de normalidade, existe também, como comentado na subseção anterior, a questão da indiscriminação com relação à pensalização ao passo que a variância registra da mesma forma um desvio para cima e um desvio para baixo, quando na realidade o investidor só enxerga como arriscado o desvio para baixo. 
+Duas carteiras podem ter a mesma variância e retorno esperado e, ainda assim, exposições muito diferentes a perdas grandes, se uma delas tiver retornos com cauda mais pesada do que a outra. 
+Tendo em vista esse problema, novas funções de risco foram definidas para evitar essa premissa de simetria indesejável, como por exemplo o VaR
+\footnote{O VaR, precursor e base fundamental para a criação do CVaR, quantifica a perda máxima a um determinado nível de confiança $\alpha$. Foi substituído pelo CVaR por ignorar a magnitude das perdas associadas ao peso da cauda (risco de cauda) e por não ter a propriedade de subaditividade \cite{barrosa2015aplicacao}.} 
+e o CVaR. Ambas as funções estão exemplificadas de forma ilustrativa na Figura \ref{fig:cvar_var}, onde VaR e CVaR são identificados justamente em um caso onde as premissas de normalidade (curva pontilhada) e simetria, causariam problemas para outras funções objetivo. 
 
 \begin{figure}[htbp]
     \centering
@@ -353,11 +378,12 @@ Sendo assim, este problema aparece no índice de Sharpe ao passo que a variânci
     \label{fig:cvar_var}
 \end{figure}
 
-O Valor-em-Risco Condicional, ou CVaR, é uma medida de risco pensada para focar exatamente no ponto cego do índice Sharpe. Em vez de resumir toda a distribuição em um desvio padrão, o CVaR olha apenas para a fatia mais extrema das perdas e calcula a perda média dentro dessa fatia \cite{rockafellar2000optimization}. O tamanho dessa fatia é definido por um nível de confiança $\alpha$: por exemplo, com $\alpha$ igual a $95\%$, olha-se apenas para os $5\%$ piores cenários de perda e calcula-se a perda média entre eles. Formalmente, sendo $L$ a perda da carteira e $\mathrm{VaR}_\alpha$ o quantil de nível $\alpha$ da distribuição de perdas, que separa os piores cenários do restante,
+O Valor-em-Risco Condicional, ou CVaR, é uma medida de risco pensada para focar exatamente no ponto cego da variância. Em vez de resumir toda a distribuição em desvios padrão, o CVaR olha apenas para a fatia mais extrema das perdas e calcula a perda média dentro dessa fatia \cite{rockafellar2000optimization}. 
+O tamanho dessa fatia é definido por um nível de confiança $\alpha$: por exemplo, com $\alpha$ igual a $95\%$, olha-se apenas para os $5\%$ piores cenários de perda e calcula-se a perda média entre eles. Formalmente, sendo $L$ a perda da carteira e $\mathrm{VaR}_\alpha$ o quantil de nível $\alpha$ da distribuição de perdas, que separa os piores cenários do restante,
 \begin{equation}
 \mathrm{CVaR}_\alpha = \mathbb{E}\big[\, L \mid L \geq \mathrm{VaR}_\alpha \,\big].
 \end{equation}
-Quanto maior o $\alpha$ escolhido, mais a medida se concentra nos cenários mais raros e mais catastróficos, o que a torna mais sensível justamente às caudas pesadas que o índice de Sharpe ignora \cite{rockafellar2000optimization}.
+Quanto maior o $\alpha$ escolhido, mais a medida se concentra nos cenários mais raros e mais catastróficos, o que a torna mais sensível justamente às caudas pesadas ignoradas na formulação anterior \cite{rockafellar2000optimization}.
 
 Assim, o problema de otimização proposto na utilização do CVaR é o equacionado a seguir:
 
@@ -447,34 +473,71 @@ Nas equações \ref{eq:objetivo lp cvar} e \ref{eq:restricoes lp cvar}, $G$ repr
 O pipeline a ser desenvolvido e abordado neste documento se propõe, nessa mesma linha, a buscar uma maneira de simplificar o problema de otimização do CVaR. A reformulação de \citeonline{rockafellar2000optimization}, por depender de uma linearização específica à estrutura da função de perda, atende bem a esse propósito quando o CVaR é a única função objetivo em consideração; neste projeto, no entanto, o interesse está em elaborar um pipeline simples, reprodutível, modular e aplicável a múltiplos casos, o que favorece uma abordagem menos amarrada à estrutura particular de cada função objetivo. A elevada complexidade da função CVaR, discutida anteriormente, e as limitações de quantidade de amostras associadas ao método de \citeonline{rockafellar2000optimization} motivam, assim, a exploração da metamodelagem como alternativa nesse contexto.
 
 
-Finalmente, com o objetivo de resumir o CVaR de forma comparativa, concluindo esta subseção, a tabela 1 mostra uma visão sucinta das funções objetivo revisadas até o momento. Indica-se nela, de forma direta, as características explicadas ao longo das seções \ref{sec: med var} e \ref{sec: sharpe}. A leitura da tabela unida à figura \ref{fig:cvar_var} ilustra como a abordagem assimétrica da função objetivo CVaR permite uma consideração mais fiel do problema de cauda em portfólios de investimento.
+Finalmente, com o objetivo de resumir o CVaR de forma comparativa, concluindo esta subseção, a tabela 1 mostra uma visão sucinta de suas características. A leitura da tabela unida à figura \ref{fig:cvar_var} ilustra como a abordagem assimétrica da função objetivo CVaR permite uma consideração mais fiel do problema de cauda em portfólios de investimento.
 
 \begin{table}[H]
 \centering
-\caption{Comparação entre média-variância, índice de Sharpe e CVaR como medidas de risco}
+\caption{Comparação entre média-variância e CVaR como medidas de risco}
 \label{tab:sharpe_cvar}
 \begin{tabular}{@{}p{2.0cm}p{2.2cm}p{3.5cm}p{7.5cm}@{}}
 \toprule
 \textbf{Medida} & \textbf{Abordagem} & \textbf{Grandeza medida} & \textbf{Consideração do problema de cauda} \\
 \midrule
-Média-variância & Simétrica & Variância da carteira & Ignora as caudas, usando a variância como risco. \\
+Média-variância & Simétrica & Variância da carteira & Ignora a cauda. Usa a variância como risco. \\
 \addlinespace
-Índice Sharpe & Simétrica & Retorno excedente por unidade de desvio & Ignora as caudas, supondo normalidade e penalizando igualmente ganhos e perdas de mesma magnitude \\
-\addlinespace
-CVaR & Assimétrica & Perda potencial & Foca nas caudas, calculando a perda média nos piores cenários, sendo sensível a caudas pesadas. \\
+CVaR & Assimétrica & Perda potencial & Foca na cauda. Calcula a perda média nos piores cenários. Sensível a caudas pesadas. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+
+
+\subsection{Incluindo o Retorno na Otimização}
+
+Até aqui o retorno apareceu apenas como um alvo a ser respeitado enquanto se minimizava o risco. Esta seção trata de como o retorno entra de fato na otimização. Começa-se pela forma mais simples, em que ele figura como uma restrição externa ao problema, e avança-se para as formulações que combinam risco e retorno em um único número, as chamadas \textit{Ratios} (Razões), discutindo primeiro o índice de Sharpe, construído sobre a variância, e depois o índice STARR, que adapta essa ideia à medida de risco adotada no projeto, o CVaR. Todas essas formulações, no entanto, compartilham uma mesma dependência: elas tomam o retorno esperado $\boldsymbol{\mu}$ como um dado já disponível. Por isso, a subsection se encerra retomando a dificuldade de estimar esse retorno, já apontada na Subseção~\ref{sec: retorno esperado}, e apresentando o CAPM como uma resposta possível a ela.
+
+\subsubsection{Retorno como Restrição}
+
+A forma mais direta de incorporar o retorno ao problema de otimização é tratá-lo como uma restrição, e não como parte da função objetivo. Nesse arranjo, a função a ser minimizada é exclusivamente a medida de risco, seja ela a variância da formulação de Markowitz ou o CVaR, enquanto o retorno entra como uma condição que a carteira precisa satisfazer. As formulações das equações~\eqref{eq:markowitz} e~\eqref{eq:cvar_opt} são exatamente desse tipo: em ambas, o termo $\mathbf{w}^\top \boldsymbol{\mu}$ aparece apenas nas restrições, fixando um retorno alvo $\mu^\ast$ ou impondo um retorno mínimo $\mu_{\min}$.
+
+A vantagem dessa abordagem é que ela separa de forma limpa as duas grandezas. Em vez de decidir de antemão quanto retorno vale a pena trocar por quanto risco, o que exigiria escolher um peso relativo entre os dois, fixa-se um nível de retorno e pergunta-se qual é a carteira de menor risco capaz de atingi-lo. Cada valor escolhido para esse alvo define um problema de otimização distinto, cuja solução é um ponto no plano de risco-retorno. Variando o alvo ao longo de uma faixa de valores admissíveis e resolvendo o problema para cada um deles, obtém-se o conjunto de carteiras que formam a fronteira eficiente, conforme já descrito na Subseção~\ref{sec: med var}.
+
+É importante notar que, nessa construção, o retorno esperado $\boldsymbol{\mu}$ permanece um dado de entrada, estimado externamente antes da otimização. A restrição $\mathbf{w}^\top \boldsymbol{\mu} = \mu^\ast$ é uma equação linear nos pesos, o que preserva a tratabilidade do problema: no caso da variância, mantém-se um problema quadrático com restrições lineares; no caso do CVaR linearizado por \citeonline{rockafellar2000optimization}, mantém-se um problema de programação linear. Toda a fragilidade discutida na Subseção~\ref{sec: retorno esperado}, ligada à dificuldade de estimar $\boldsymbol{\mu}$, continua presente, apenas deslocada para a etapa anterior à otimização. Tratar o retorno como restrição organiza o problema, mas não resolve a questão de onde vêm os números que alimentam essa restrição, assunto retomado na seção \ref{sec: CAPM}.
+
+\subsubsection{Índice de Sharpe}
+\label{sec: sharpe}
+
+Uma forma direta de resumir risco e retorno em um único número é o índice de Sharpe, que mede quanto uma carteira é rentável acima de um ativo sem risco, quantificando quanto se ganha a mais que esse ativo por unidade de risco assumido \cite{sharpe1994sharpe}:
+\begin{equation}
+S_p = \frac{\mathbf{w}^\top \boldsymbol{\mu} - r_f}{\sqrt{\mathbf{w}^\top \boldsymbol{\Sigma} \mathbf{w}}},
+\label{eq:sharpe}
+\end{equation}
+em que $r_f$ é o retorno do ativo sem risco, tipicamente um título público de curto prazo. Um Sharpe alto indica muito retorno por pouco risco. A Equação~\eqref{eq:sharpe} usa a variância completa da carteira, incorporando a covariância pelo termo $\mathbf{w}^\top \boldsymbol{\Sigma} \mathbf{w}$.
+
+O índice de Sharpe carrega, no entanto, uma suposição implícita: a de que a distribuição dos retornos da carteira é aproximadamente normal, ou seja, que ela fica inteiramente descrita por apenas dois números, a média e o desvio padrão. Por conta dessa suposição, dois desvios de mesma magnitude, um para cima e outro para baixo, são igualmente prováveis e igualmente penalizados pela variância. Essa suposição é conveniente, mas nem sempre corresponde ao comportamento real dos retornos de ações, e nem à penalização que desejamos aplicar ao problema, dado que um desvio para cima em relação ao retorno médio é positivo e um para baixo é negativo, como discutido a seguir \cite{fabozzi2008portfolio}.
+
+\subsubsection{Índice STARR}
+
+O índice de Sharpe resume risco e retorno em um único número, mas o faz apoiado na variância, e por isso herda todas as limitações discutidas anteriormente: a suposição de normalidade e a penalização simétrica de desvios para cima e para baixo. Uma forma de manter a lógica da razão, retorno excedente por unidade de risco, sem carregar essas limitações, é substituir o denominador por uma medida de risco que capture o comportamento de cauda. É essa a proposta do índice STARR (Stable Tail Adjusted Return Ratio), que troca o desvio padrão pelo CVaR no denominador \cite{martin2003phi}:
+\begin{equation}
+\mathrm{STARR}_\alpha = \frac{\mathbf{w}^\top \boldsymbol{\mu} - r_f}{\mathrm{CVaR}_\alpha(\mathbf{w})},
+\label{eq:starr}
+\end{equation}
+em que o numerador é o mesmo retorno excedente sobre o ativo sem risco usado no índice de Sharpe, e o denominador é o CVaR ao nível de confiança $\alpha$, definido na Subseção~\ref{sec: med var}. A leitura da razão é análoga à do Sharpe: quanto maior o STARR, mais retorno excedente a carteira entrega por unidade de risco de cauda assumido.
+
+A diferença de comportamento entre os dois índices está inteiramente no denominador. Enquanto o Sharpe mede o risco pelo espalhamento total dos retornos em torno da média, tratando ganhos e perdas de forma indistinta, o STARR mede o risco apenas pela perda média nos piores cenários. Duas carteiras com o mesmo retorno esperado e a mesma variância, mas com caudas de perda diferentes, recebem o mesmo Sharpe e STARR distintos, sendo penalizada pelo STARR justamente aquela com maior exposição a perdas extremas. Por alinhar o denominador da razão à medida de risco central do projeto, o STARR é a forma natural de resumir risco e retorno em um único número dentro da abordagem baseada em CVaR, mantendo a coerência com a escolha de função objetivo feita nas seções anteriores.
+
 \subsubsection{CAPM}
+\label{sec: CAPM}
+As formulações anteriores, tanto a restrição de retorno quanto as razões de Sharpe e STARR, partem do vetor de retornos esperados $\boldsymbol{\mu}$ como se ele fosse conhecido. Na prática, porém, esse é o ponto mais delicado de toda a construção, conforme adiantado na Subseção~\ref{sec: retorno esperado}. A média histórica dos retornos, embora seja a estimativa mais direta, é ruidosa e converge lentamente com o tamanho da amostra, o que produz carteiras instáveis e sensíveis a pequenas variações nos dados. Enquanto o risco de um ativo pode ser aproximado com relativa segurança a partir de uma amostra limitada, o seu retorno futuro é muito mais difícil de estimar, e é dessa dificuldade que decorre boa parte da fragilidade das carteiras obtidas por otimização crua.
 
-Enquanto o Sharpe e o CVaR tratam de como combinar risco e retorno em um objetivo, o problema da estimativa de $\boldsymbol{\mu}$ discutido na abertura desta subseção permanece. Uma primeira resposta a esse problema veio de \citeonline{black1992global}, que em vez de estimar $\boldsymbol{\mu}$ livremente a partir do histórico de cada ativo, propõem ancorar essa estimativa em um ponto de referência vindo de um modelo de equilíbrio de mercado, o CAPM (Capital Asset Pricing Model), desenvolvido por \citeonline{sharpe1964capital} e \citeonline{lintner1965valuation}.
+Uma primeira resposta a esse problema veio de \citeonline{black1992global}, que em vez de estimar $\boldsymbol{\mu}$ livremente a partir do histórico de cada ativo, propõem ancorar essa estimativa em um ponto de referência vindo de um modelo de equilíbrio de mercado, o CAPM (Capital Asset Pricing Model), desenvolvido por \citeonline{sharpe1964capital} e \citeonline{lintner1965valuation}.
 
-A ideia de equilíbrio funciona assim: Se todo investidor decide de maneira racional e integralmente informada, ninguém opta por manter na própria carteira um ativo que parece ruim ou arriscado demais para o seu retorno, nem consegue comprar mais do que existe de um ativo que parece bom demais. Por isso, a quantidade de cada ativo que o conjunto de todos os investidores querem ter precisa bater com a quantidade que existe no mercado. Quando isso acontece, o mercado está em equilíbrio, e a a distribuição das quantidades de tudo que existe para ser comprado acaba por configurar uma carteira eficiente.
+A ideia de equilíbrio funciona assim: se todo investidor decide de maneira racional e integralmente informada, ninguém opta por manter na própria carteira um ativo que parece ruim ou arriscado demais para o seu retorno, nem consegue comprar mais do que existe de um ativo que parece bom demais. Por isso, a quantidade de cada ativo que o conjunto de todos os investidores querem ter precisa bater com a quantidade que existe no mercado. Quando isso acontece, o mercado está em equilíbrio, e a distribuição das quantidades de tudo que existe para ser comprado acaba por configurar uma carteira eficiente.
 
 Esse cenário de equilíbrio não descreve o mercado real de forma literal. Nenhum investidor é perfeitamente racional o tempo todo, nem tem acesso a toda a informação relevante, e o mercado raramente está em um estado de equilíbrio exato e estável. A utilidade do equilíbrio não está em ser uma descrição fiel da realidade, mas em oferecer um ponto de referência neutro para o retorno esperado de um ativo, um número que não depende de nenhuma opinião específica sobre aquele ativo, apenas do seu comportamento em relação ao mercado como um todo. Esse ponto de partida evita o problema da média histórica, que é ruidosa por depender de uma amostra curta e específica de cada ativo, e ancora a estimativa em algo que se aplica a todos os ativos ao mesmo tempo, o comportamento agregado do mercado, que é estatisticamente mais estável do que qualquer ativo isolado.
 
-Explicando mais a fundo, essa carteira de mercado em equilíbrio serve então como um ponto de comparação natural para qualquer ativo individual. Em vez de olhar para o quanto um ativo varia sozinho, o CAPM traz algo diferente: o quanto esse ativo varia junto com o mercado como um todo. Essa medida é quantificada pela covariância entre o retorno do ativo e o retorno da carteria completa, sendo que o CAPM apenas fixa qual carteira usar como referência, passando a ser sempre a carteira de mercado. Assim, a contribuição de um ativo ao risco de uma carteira depende da covariância entre o retorno dele e o retorno dessa carteira, e não da variância do ativo isolado. Quando a carteira de referência é o mercado inteiro, essa covariância normalizada é identificada por $\beta$:
+Explicando mais a fundo, essa carteira de mercado em equilíbrio serve então como um ponto de comparação natural para qualquer ativo individual. Em vez de olhar para o quanto um ativo varia sozinho, o CAPM traz algo diferente: o quanto esse ativo varia junto com o mercado como um todo. Essa medida é quantificada pela covariância entre o retorno do ativo e o retorno da carteira completa, sendo que o CAPM apenas fixa qual carteira usar como referência, passando a ser sempre a carteira de mercado. Assim, a contribuição de um ativo ao risco de uma carteira depende da covariância entre o retorno dele e o retorno dessa carteira, e não da variância do ativo isolado. Quando a carteira de referência é o mercado inteiro, essa covariância normalizada é identificada por $\beta$:
 \begin{equation}
 \label{eq: capm esperado}
 \mathbb{E}[R_i] - r_f = \beta_i \big(\mathbb{E}[R_m] - r_f\big),
@@ -486,9 +549,11 @@ Na equação~\eqref{eq: capm esperado}, temos $R_m$, o retorno da carteira de me
 
 A variância total de um ativo pode ser separada em duas parcelas. Uma parcela está ligada ao mercado, medida pela covariância $\mathrm{Cov}(R_i, R_m)$, e é a parcela que o beta captura. A outra é o risco idiossincrático, a parte da variância do ativo que não tem relação com o comportamento do mercado como um todo. Como diferentes ativos têm componentes idiossincráticos praticamente independentes entre si, essa parcela tende a se cancelar quando muitos ativos são combinados em uma carteira. Sobra, na carteira diversificada, apenas a parcela ligada ao mercado. É por isso que o CAPM afirma que o retorno esperado de um ativo deve compensar apenas a parcela da volatilidade sensível ao mercado, aquela medida pelo beta ($\beta$), dado que um investidor racional pode eliminar o risco idiossincrático apenas diversificando a carteira.
 
-Essa distinção é o que torna o retorno esperado do CAPM mais robusto do que a média histórica usada na formulação clássica de média variância. A média histórica de um ativo mistura indiscriminadamente as duas fontes de variação, a ligada ao mercado e a idiossincrática, e herda todo o ruído de ambas, além de representar um comportamento específico baseado em amostras de ações individuais pouco significativas se comparadas à segurança de se basear na totalidade do mercado. O retorno implícito no equilíbrio do CAPM, por depender apenas do beta e do retorno associado ao risco sensível ao mercado, dois números que se apoiam em toda a base de ativos do mercado e não apenas no histórico isolado daquele ativo, tende a ser uma estimativa menos ruidosa e menos sujeita a oscilações de uma amostra para outra.
+Essa distinção é o que torna o retorno esperado do CAPM mais robusto do que a média histórica usada na formulação clássica de média-variância. A média histórica de um ativo mistura indiscriminadamente as duas fontes de variação, a ligada ao mercado e a idiossincrática, e herda todo o ruído de ambas, além de representar um comportamento específico baseado em amostras de ações individuais pouco significativas se comparadas à segurança de se basear na totalidade do mercado. O retorno implícito no equilíbrio do CAPM, por depender apenas do beta e do retorno associado ao risco sensível ao mercado, dois números que se apoiam em toda a base de ativos do mercado e não apenas no histórico isolado daquele ativo, tende a ser uma estimativa menos ruidosa e menos sujeita a oscilações de uma amostra para outra.
 
-\citeonline{black1992global} usam justamente esses retornos implícitos no equilíbrio como ponto neutro de partida, em vez da média histórica de cada ativo, e ajustam esse ponto com as visões particulares do investidor sobre ativos específicos. O resultado são estimativas de retorno mais estáveis, que não dependem inteiramente do ruído da amostra histórica, e carteiras finais mais razoáveis do que as obtidas pela otimização crua. 
+\citeonline{black1992global} usam justamente esses retornos implícitos no equilíbrio como ponto neutro de partida, em vez da média histórica de cada ativo, e ajustam esse ponto com as visões particulares do investidor sobre ativos específicos. O resultado são estimativas de retorno mais estáveis, que não dependem inteiramente do ruído da amostra histórica, e carteiras finais mais razoáveis do que as obtidas pela otimização crua.
+
+
 
 \subsection{Projeto de experimentos e amostragem do espaço}
 
@@ -531,20 +596,23 @@ Para o exemplo em duas dimensões, os primeiros números direcionais de cada eix
     \centering
     \begin{tabular}{c c c c c}
         \hline
-        \toprule
+        \addlinespace
         Dimensão & Nível $k$ & $m_k$ & $v_k = m_k/2^k$ & Representação binária \\
+        \addlinespace
         \hline
-        \toprule
+        \addlinespace
         \multirow{3}{*}{$1$} & $1$ & $1$ & $1/2 = 0.500$ & $0.1_2$ \\
                              & $2$ & $1$ & $1/4 = 0.250$ & $0.01_2$ \\
                              & $3$ & $1$ & $1/8 = 0.125$ & $0.001_2$ \\
+        \addlinespace                     
         \hline
-        \midrule
+        \addlinespace
         \multirow{3}{*}{$2$} & $1$ & $1$ & $1/2 = 0.500$ & $0.1_2$ \\
                              & $2$ & $3$ & $3/4 = 0.750$ & $0.11_2$ \\
                              & $3$ & $7$ & $7/8 = 0.875$ & $0.111_2$ \\
+        \addlinespace                     
         \hline
-        \midrule
+        
     \end{tabular}
     \caption{Números direcionais das duas dimensões, calculados até o nível $k=3$.}
     \label{tab:direction}
@@ -603,7 +671,7 @@ Por construção, os pesos são não negativos e somam um, sem rejeição de pon
 
 Cada carteira possível pode ser vista como um ponto de um mapa cuja altura representa o seu desempenho, por exemplo o Sharpe da carteira. O objetivo é achar o pico mais alto. A dificuldade é que não se enxerga o terreno inteiro: para conhecer a altura em um ponto é preciso medir, e cada medição é cara, pois envolve simular o desempenho da carteira sob incerteza. Com orçamento de medições limitado, a pergunta é como achar o pico gastando o mínimo de avaliações. Essa é exatamente a pergunta da otimização bayesiana.
 
-Em vez de medir o terreno todo, fazem-se algumas medições espalhadas e, a partir delas, constrói-se um palpite educado sobre a superfície inteira, inclusive onde não se mediu. Esse palpite barato de consultar é o modelo substituto. O substituto mais usado é o processo gaussiano \cite{rasmussen2006gaussian}, que fornece, para cada ponto $\mathbf{w}$, não apenas uma média prevista $\hat{\mu}(\mathbf{w})$, mas também uma medida de incerteza $\hat{\sigma}(\mathbf{w})$ sobre essa previsão. Perto de onde se mediu, a incerteza é pequena, enquanto longe do ponto de medição ela é grande. É essa informação de incerteza que orienta onde vale a pena medir em seguida.
+Em vez de medir o terreno todo, fazem-se algumas medições espalhadas e, a partir delas, constrói-se um palpite educado sobre a superfície inteira, inclusive onde não se mediu. Esse palpite barato de consultar é o modelo substituto. O substituto mais usado é o processo gaussiano \cite{rasmussen2006gaussian}, que fornece, para cada ponto $\mathbf{w}$, não apenas uma média prevista $\hat{\mu}(\mathbf{w})$ (não confundir com o $\mu$ do retorno esperado), mas também uma medida de incerteza $\hat{\sigma}(\mathbf{w})$ sobre essa previsão. Perto de onde se mediu, a incerteza é pequena, enquanto longe do ponto de medição ela é grande. É essa informação de incerteza que orienta onde vale a pena medir em seguida.
 
 A escolha do próximo ponto cabe à função de aquisição, que combina a média prevista e a incerteza para pontuar cada candidato, equilibrando uma tensão entre a explotação e a exploração. A explotação consiste em medir onde o substituto prevê altura alta, apostando no que já parece bom. A exploração consiste em medir onde o substituto está muito incerto, investigando o desconhecido, pois pode haver um pico escondido. Apenas explotar prende a busca em um ótimo local; apenas explorar desperdiça medições em regiões ruins. Esse compromisso é o tema central de \citeonline{moran2026balancing} e reaparece em \citeonline{millar2025bayesian} e \citeonline{you2025improving}.
 
@@ -616,7 +684,7 @@ z = \frac{\hat{\mu}(\mathbf{w}) - f^\ast}{\hat{\sigma}(\mathbf{w})},
 \end{equation}
 onde $\Phi$ e $\phi$ são a função de distribuição acumulada e a densidade da normal padrão. O primeiro termo da Equação~\eqref{eq:ei} privilegia a explotação, favorecendo pontos de média alta; o segundo privilegia a exploração, favorecendo pontos de alta incerteza. O ponto de maior EI é o próximo a ser medido.
 
-Sobre a escolha do substituto, cabe notar que o processo gaussiano é o padrão na literatura justamente por fornecer a incerteza de forma natural e bem fundamentada, o que é essencial para a função de aquisição. Modelos da família de árvores, como florestas aleatórias e algoritmos de reforço de gradiente, não fornecem essa incerteza de forma imediata. \citeonline{you2025improving} recorrem a um estimador de estrutura em árvore, o TPE, que constrói a incerteza de outra maneira e escala melhor que o processo gaussiano sob orçamento apertado. Testar tais alternativas é uma linha legítima, condicionada à capacidade de o substituto entregar incerteza utilizável pela função de aquisição.
+Sobre a escolha do substituto, cabe notar que o processo gaussiano é o padrão na literatura justamente por fornecer a incerteza de forma natural e bem fundamentada, o que é essencial para a função de aquisição. Modelos da família de árvores, como florestas aleatórias e algoritmos de reforço de gradiente, não fornecem essa incerteza de forma imediata. \citeonline{you2025improving} recorrem a um estimador de estrutura em árvore, o TPE, que constrói a incerteza de outra maneira e escala melhor que o processo gaussiano sob orçamento apertado. Testar tais alternativas é uma linha legítima, condicionada à capacidade de o substituto entregar incerteza utilizável pela função de aquisição, ou condicionada à mudança da função de aquisição.
 
 \subsection{Considerações parciais da revisão}
 

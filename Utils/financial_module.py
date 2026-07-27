@@ -41,10 +41,26 @@ class StockPortfolio:
 
 
 
-class MeanVariance:
+def _expected_portfolio_return(w: np.ndarray, R: np.ndarray, mu: Optional[np.ndarray], n_assets: int) -> float:
     """
-    MeanVariance Class is a Callable Object implementing Markowitz's mean-variance model.
-    Any instance of MeanVariance deals only with a predefined number of assets to avoid mistaken
+    Computes w^T mu, the portfolio's expected return </p>
+    mu (np.ndarray, optional): expected return vector (length n_assets). When omitted, the historical
+    sample mean of R is used as a default estimator. Pass an externally computed vector (e.g. CAPM-implied
+    returns, or an arbitrary view held by the investor) to keep the expected return decoupled from the
+    historical sample used to estimate risk.
+    """
+    if mu is None:
+        mu = R.mean(axis=0)
+    else:
+        mu = np.asarray(mu, dtype=float)
+        assert mu.shape == (n_assets,), f"mu must have shape ({n_assets},) (current is {mu.shape})"
+    return float(w @ mu)
+
+
+class PortfolioVariance:
+    """
+    PortfolioVariance Class is a Callable Object implementing Markowitz's mean-variance model.
+    Any instance of PortfolioVariance deals only with a predefined number of assets to avoid mistaken
     comparison between portfolios of different characteristics.
     """
     def __init__(self, n_assets: int):
@@ -52,7 +68,7 @@ class MeanVariance:
         self.n_assets = n_assets
 
     def __repr__(self):
-        return f"<Object: Callable MeanVariance> (n_assets={self.n_assets})"
+        return f"<Object: Callable PortfolioVariance> (n_assets={self.n_assets})"
 
 
     def getCovariance(self, R: np.ndarray) -> np.ndarray:
@@ -64,23 +80,25 @@ class MeanVariance:
         assert R.shape[1] == self.n_assets, f"R must have {self.n_assets} columns (current is {R.shape[1]})"
         return np.cov(R, rowvar=False)
 
-    def __call__(self, w: np.ndarray, R: np.ndarray) -> tuple[float, float]:
+    def __call__(self, w: np.ndarray, R: np.ndarray, mu: Optional[np.ndarray] = None) -> tuple[float, float]:
         """
         Computes the Markowitz mean-variance objective function for portfolio weights w </p>
         w (np.ndarray): 1-Dimensional array of portfolio weights (length n_assets) </p>
-        R (np.ndarray): asset returns matrix of shape (T, n_assets) </p>
+        R (np.ndarray): asset returns matrix of shape (T, n_assets), used to estimate risk (and,
+            when mu is not provided, also used as the historical estimator of expected return) </p>
+        mu (np.ndarray, optional): expected return vector (length n_assets), estimated externally
+            (e.g. via CAPM or an investor's own view). Defaults to the historical mean of R </p>
         Returns (mu_p, sigma2_p): the portfolio's expected return and variance
         """
         assert w.ndim == 1, f"w array must be 1-Dimensional (current is {w.ndim}D)"
         assert w.size == self.n_assets, f"w must have {self.n_assets} entries (current is {w.size})"
         cov = self.getCovariance(R)
-        mu = R.mean(axis=0)
-        mu_p = float(w @ mu)
+        mu_p = _expected_portfolio_return(w, R, mu, self.n_assets)
         sigma2_p = float(w @ cov @ w)
         return mu_p, sigma2_p
 
 
-class SharpeIndex(MeanVariance):
+class SharpeIndex(PortfolioVariance):
     """
     SharpeIndex Class is a Callable Object implemented so that any instance of SharpeIndex deals only with
     a predefined set of portfolio cases to avoid mistaken comparison between portfolios of different characteristics.
@@ -96,17 +114,20 @@ class SharpeIndex(MeanVariance):
     def __repr__(self):
         return f"<Object: Callable SharpeIndex> (n_assets={self.n_assets}; rf={self.rf})"
 
-    def _MeanVariance(self, w:np.ndarray, R: np.ndarray):
-        return super().__call__(w, R)
+    def _PortfolioVariance(self, w: np.ndarray, R: np.ndarray, mu: Optional[np.ndarray] = None):
+        return super().__call__(w, R, mu)
 
-    def __call__(self, w:np.ndarray, R: np.ndarray) -> float:
+    def __call__(self, w: np.ndarray, R: np.ndarray, mu: Optional[np.ndarray] = None) -> float:
         """
         Computes the Sharpe Index (Sharpe Ratio) objective function for a portfolio return series </p>
         w (np.ndarray): 1-Dimensional array of portfolio weights (length n_assets) </p>
-        R (np.ndarray): asset returns matrix of shape (T, n_assets) </p>
+        R (np.ndarray): asset returns matrix of shape (T, n_assets), used to estimate risk (and,
+            when mu is not provided, also used as the historical estimator of expected return) </p>
+        mu (np.ndarray, optional): expected return vector (length n_assets), estimated externally
+            (e.g. via CAPM or an investor's own view). Defaults to the historical mean of R </p>
         Returns the portfolios Sharpe Index
         """
-        mu_p, sigma2_p = self._MeanVariance(w, R)
+        mu_p, sigma2_p = self._PortfolioVariance(w, R, mu)
         return (mu_p - self.rf)/np.sqrt(sigma2_p)
 
 
@@ -278,6 +299,50 @@ class CVaR(VaR):
             message = "no valid type was found therefore no calculation war returned"
             raise ValueError(message)
         
+
+
+class STARRIndex(CVaR):
+    """
+    STARRIndex Class is a Callable Object implemented so that any instance of STARRIndex deals only with
+    a predefined set of portfolio cases to avoid mistaken comparison between portfolios of different characteristics.
+    In this sense, STARRIndex predefines the risk-free rate, confidence level, number of assets and type of calculation.
+    """
+    def __init__(self, n_assets: int, rf: float, alpha: float,
+                 type: Literal["non-parametric", "parametric"] = "non-parametric"):
+        assert rf > 0, f"rf must be > 0 (current is {rf})"
+        assert n_assets > 0, f"n_assets must be > 0 (current is {n_assets})"
+        super().__init__(n_assets=n_assets, alpha=alpha, type=type)
+        self.n_assets = n_assets
+        self.rf = rf
+
+    def __repr__(self):
+        return f"<Object: Callable STARRIndex> (n_assets={self.n_assets}; rf={self.rf}; alpha={self.alpha}; type={self.type})"
+
+    def _CVaR(self, ret: np.ndarray):
+        return super().__call__(ret)
+
+    def __call__(self, w: np.ndarray, R: np.ndarray, mu: Optional[np.ndarray] = None) -> float:
+        """
+        Computes the STARR Ratio objective function for portfolio weights w </p>
+        w (np.ndarray): 1-Dimensional array of portfolio weights (length n_assets) </p>
+        R (np.ndarray): asset returns matrix of shape (T, n_assets), used both to build the portfolio's
+            historical return series for the CVaR denominator and, when mu is not provided, as the
+            historical estimator of expected return </p>
+        mu (np.ndarray, optional): expected return vector (length n_assets), estimated externally
+            (e.g. via CAPM or an investor's own view). Defaults to the historical mean of R </p>
+        Returns the portfolio's STARR Index
+        """
+        assert w.ndim == 1, f"w array must be 1-Dimensional (current is {w.ndim}D)"
+        assert w.size == self.n_assets, f"w must have {self.n_assets} entries (current is {w.size})"
+        mu_p = _expected_portfolio_return(w, R, mu, self.n_assets)
+        ret_p = R @ w
+        cvar_result = self._CVaR(ret_p)
+        cvar_p = cvar_result[0] if self.type == "non-parametric" else cvar_result
+        # CVaR here is the average tail *return* (typically negative); STARR's denominator
+        # is a loss magnitude, so it is the sign-flipped, positive counterpart of that value.
+        return (mu_p - self.rf) / -cvar_p
+
+
 
 
 class ReturnSampler:
