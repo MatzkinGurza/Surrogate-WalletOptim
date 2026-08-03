@@ -196,9 +196,20 @@ class VaR:
 
     def __call__(self, ret: np.ndarray) -> tuple[float, np.ndarray] | tuple[float, float, float]:
         """
-        Returns VaR and ordered ret array if method is non-parametric </p>
-        Returns VaR, mu and sigma if method is parametric
-        
+        Computes the Value at Risk (VaR) for a portfolio return series </p>
+        ret (np.ndarray): 1-Dimensional portfolio return series (e.g. historical or
+            bootstrapped scenarios) used to estimate the alpha-quantile tail </p>
+        Returns, when type="non-parametric": (var, ret_sorted), where var is the
+            empirical alpha-quantile of ret (an actual observed value, since it is
+            computed with method="higher" rather than interpolated) and ret_sorted
+            is ret sorted ascending, reused by CVaR to avoid re-sorting </p>
+        Returns, when type="parametric": (var, mu, sigma), where var assumes ret
+            is normally distributed (var = mu + z_alpha * sigma) and mu, sigma are
+            the sample mean and standard deviation of ret, reused by CVaR and
+            plotDistribution to avoid recomputation </p>
+        var is expressed as a return threshold, not a loss magnitude: for typical
+        confidence levels it is negative, and losses worse than it are expected
+        to occur with probability alpha
         """
         assert ret.ndim == 1, f"ret array must be 1-Dimensional (current is {ret.ndim}D)"
         assert ret.size > 0, f"ret array must contain more than 0 entries (current is {ret.size})"
@@ -257,11 +268,9 @@ class CVaR(VaR):
         x = np.linspace(ret.min(), ret.max(), 300)
         ax.plot(x, gaussian_kde(ret)(x), color="steelblue", linewidth=2, label="Densidade (KDE)")
 
-        if self.type == "non-parametric":
-            cvar, var, _ = self(ret)
-        else:
-            var, mu, sigma = self._VaR(ret)
-            cvar = self(ret)
+        cvar, var = self(ret)
+        if self.type == "parametric":
+            _, mu, sigma = self._VaR(ret)
             ax.plot(x, norm.pdf(x, mu, sigma), color="black", linewidth=1.5, linestyle="--", label="Normal ajustada")
 
         var_label = f"VaR ({self.alpha:.0%}) = {var:.2%}"
@@ -284,17 +293,34 @@ class CVaR(VaR):
         fig.tight_layout()
         return fig
     
-    def __call__(self, ret: np.ndarray) -> tuple[float, float, np.ndarray]:
-        """Returns CVaR, VaR and ordered ret array"""
+    def __call__(self, ret: np.ndarray) -> tuple[float, float]:
+        """
+        Computes the Conditional Value at Risk (CVaR, a.k.a. Expected Shortfall)
+        for a portfolio return series </p>
+        ret (np.ndarray): 1-Dimensional portfolio return series, forwarded to
+            VaR to obtain the alpha-quantile threshold </p>
+        Returns (cvar, var), regardless of type </p>
+        When type="non-parametric": cvar is the average of every observation
+            in ret at or below var (the tail beyond the VaR threshold), and
+            var is the empirical alpha-quantile computed by VaR </p>
+        When type="parametric": both cvar and var assume ret is normally
+            distributed; var = mu + z_alpha * sigma (as computed by VaR) and
+            cvar is the closed-form tail expectation under that same normal
+            model </p>
+        cvar, like var, is expressed as a return rather than a loss magnitude,
+        and is typically more negative than var since it averages over the
+        tail instead of only marking its boundary
+        """
         if self.type == "non-parametric":
             var, ret_sorted = self._VaR(ret)
             tail = ret_sorted[ret_sorted <= var]
-            return  tail.mean(), var, ret_sorted
+            return tail.mean(), var
         elif self.type == "parametric":
             var, mu, sigma = self._VaR(ret)
             z_alpha = norm.ppf(self.alpha)
             phi_z = norm.pdf(z_alpha)  # densidade da normal padrão em z_alpha
-            return mu - sigma * phi_z / self.alpha
+            cvar = mu - sigma * phi_z / self.alpha
+            return cvar, var
         else:
             message = "no valid type was found therefore no calculation war returned"
             raise ValueError(message)
@@ -321,26 +347,23 @@ class STARRIndex(CVaR):
     def _CVaR(self, ret: np.ndarray):
         return super().__call__(ret)
 
-    def __call__(self, w: np.ndarray, R: np.ndarray, mu: Optional[np.ndarray] = None) -> float:
+    def __call__(self, ret: np.ndarray, mu: Optional[float] = None) -> tuple[float, float, float]:
         """
-        Computes the STARR Ratio objective function for portfolio weights w </p>
-        w (np.ndarray): 1-Dimensional array of portfolio weights (length n_assets) </p>
-        R (np.ndarray): asset returns matrix of shape (T, n_assets), used both to build the portfolio's
-            historical return series for the CVaR denominator and, when mu is not provided, as the
-            historical estimator of expected return </p>
-        mu (np.ndarray, optional): expected return vector (length n_assets), estimated externally
-            (e.g. via CAPM or an investor's own view). Defaults to the historical mean of R </p>
-        Returns the portfolio's STARR Index
+        Computes the STARR Ratio objective function for a portfolio return series </p>
+        ret (np.ndarray): 1-Dimensional portfolio return series </p>
+        mu (float, optional): expected portfolio return, estimated externally (e.g. via CAPM
+            or an investor's own view on this specific portfolio). Defaults to the historical
+            mean of ret </p>
+        Returns (starr, cvar, var): the portfolio's STARR Index together with
+            the CVaR and VaR it was computed from (type="non-parametric" or
+            "parametric", per how this instance was configured) </p>
         """
-        assert w.ndim == 1, f"w array must be 1-Dimensional (current is {w.ndim}D)"
-        assert w.size == self.n_assets, f"w must have {self.n_assets} entries (current is {w.size})"
-        mu_p = _expected_portfolio_return(w, R, mu, self.n_assets)
-        ret_p = R @ w
-        cvar_result = self._CVaR(ret_p)
-        cvar_p = cvar_result[0] if self.type == "non-parametric" else cvar_result
+        mu_p = float(ret.mean()) if mu is None else float(mu)
+        cvar_p, var_p = self._CVaR(ret)
         # CVaR here is the average tail *return* (typically negative); STARR's denominator
         # is a loss magnitude, so it is the sign-flipped, positive counterpart of that value.
-        return (mu_p - self.rf) / -cvar_p
+        starr = (mu_p - self.rf) / -cvar_p
+        return starr, cvar_p, var_p
 
 
 
@@ -427,3 +450,16 @@ class ReturnSampler:
         log_returns = self._to_log_returns(prices)
         starts = self._window_starts(log_returns.shape[0])
         return self._aggregate(log_returns, starts)
+
+
+
+
+
+class ReturnsEstimator:
+    "Return estimator namespace containing..."
+
+    class Average:
+        ...
+
+    class CAPM:
+        ...

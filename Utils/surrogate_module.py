@@ -27,6 +27,428 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Kernel
 
 
+import autograd.numpy as anp
+
+ 
+ 
+class SurrogateKernels:
+    """
+    Namespace of ready-to-use kernel priors. Each nested class returns a composed
+    scikit-learn Kernel when instantiated; see each docstring for the assumptions
+    it makes and when to use it.
+    """
+    @staticmethod
+    def _matern52(x_h, X_train, amp, length_scales):
+        """amp * Matern(nu=5/2, ARD). length_scales: vetor (n_dims,)."""
+        diff = (x_h[None, :] - X_train) / length_scales[None, :]
+        r2 = anp.sum(diff * diff, axis=1)
+        r = anp.sqrt(r2 + 1e-12)
+        s5 = anp.sqrt(5.0)
+        return amp * (1.0 + s5 * r + (5.0 / 3.0) * r2) * anp.exp(-s5 * r)
+    
+    @staticmethod
+    def _dot(x_h, X_train, sigma_0):
+        """DotProduct: sigma_0^2 + x.x'."""
+        return sigma_0 ** 2 + X_train @ x_h
+    
+    @staticmethod
+    def _rational_quadratic(x_h, X_train, amp, length_scale, alpha_rq):
+        """amp * RationalQuadratic isotropico: amp*(1 + d^2/(2 alpha l^2))^(-alpha)."""
+        diff = x_h[None, :] - X_train
+        d2 = anp.sum(diff * diff, axis=1)
+        return amp * (1.0 + d2 / (2.0 * alpha_rq * length_scale ** 2)) ** (-alpha_rq)
+    
+    
+    
+ 
+    class Plain:
+        """
+        Amplitude * Matern 5/2 (ARD) + white noise.
+ 
+        Assumes: a smooth, twice-differentiable stationary signal with no known
+        global trend, plus homogeneous estimation noise. Matern 5/2 keeps two
+        derivatives (unlike RBF's infinite smoothness, which over-smooths regime
+        breaks) while ARD gives each projected coordinate its own length-scale.
+        The safe default when the surface's global shape is unknown.
+ 
+        n_dims: number of projected coordinates (n_assets - 1).
+        amp_bounds, ls_bounds, noise_bounds: optimization bounds for amplitude,
+        length-scales, and noise level.
+        Returns a scikit-learn Kernel.
+        """
+        def __init__(self, n_dims, amp_bounds=(1e-3, 1e3),
+                    ls_bounds=(1e-2, 1e2), noise_bounds=(1e-10, 1e1)):
+            self.n_dims = n_dims
+            self.amp_bounds = amp_bounds
+            self.ls_bounds = ls_bounds
+            self.noise_bounds = noise_bounds
+
+        def build(self):
+            return (ConstantKernel(1.0, self.amp_bounds)
+                    * Matern([1.0] * self.n_dims, self.ls_bounds, nu=2.5)
+                    + WhiteKernel(1e-2, self.noise_bounds))
+
+        @staticmethod
+        def eval_autograd(x, X_train, hp):
+            """
+            Evaluates the Plain kernel using autograd for gradient computation.
+            x: 1D array of shape (n_dims,) representing a single input point.
+            X_train: 2D array of shape (n_samples, n_dims) representing the training data.
+            hp: dictionary containing hyperparameters:
+                - 'amp': amplitude (float)
+                - 'length_scales': length scale (float)
+            """
+            anp_kernel = SurrogateKernels._matern52(x, X_train, hp['amp'], hp['length_scales'])
+            return anp_kernel
+
+
+        def _read_params(self, kernel_origin, p:Dict[str, Any], ndims: int) -> Dict[str, Any]:
+            """
+            Reads the hyperparameters from a dictionary and returns a new dictionary
+            with the relevant parameters for the Plain kernel (used on .eval_autograd method as parameter hp).
+            p: dictionary containing hyperparameters returned from kernel.get_params().
+            Returns a dictionary with keys 'amp' and 'length_scales'.
+            """
+            if kernel_origin.__class__ != self.__class__:
+                raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
+            else:
+                try:
+                    amp = p['constant_value']
+                    length_scales = p['length_scale']
+                    if isinstance(length_scales, float):
+                        length_scales = np.full(ndims, length_scales)
+                    elif isinstance(length_scales, list):
+                        length_scales = np.array(length_scales)
+                    elif isinstance(length_scales, np.ndarray):
+                        pass
+                    else:
+                        raise ValueError(f"Unexpected type for length_scales: {type(length_scales)}")
+
+                    return {'amp': amp, 'length_scales': length_scales}
+                    
+                except KeyError as e:
+                    raise KeyError(f"Missing expected hyperparameter key: {e}")
+                except Exception as e:
+                    raise ValueError(f"Error reading hyperparameters: {e}")
+
+
+
+ 
+    class Tail:
+        """
+        Amplitude * Matern 5/2 (ARD) + linear trend + white noise.
+ 
+        Assumes: a smooth signal riding on a dominant linear trend, plus
+        estimation noise. For ratio/tail measures (Sharpe, VaR, CVaR, STARR):
+        the Matern captures local curvature and the added DotProduct supplies a
+        global direction the Matern alone would not extrapolate, reverting to the
+        mean away from data. White noise matters because bootstrap/tail estimates
+        are noisy.
+ 
+        n_dims: number of projected coordinates (n_assets - 1).
+        amp_bounds, ls_bounds, sigma0_bounds, noise_bounds: optimization bounds.
+        Returns a scikit-learn Kernel.
+        """
+        def __init__(self, n_dims, amp_bounds=(1e-3, 1e3),
+                    ls_bounds=(1e-2, 1e2), sigma0_bounds=(1e-6, 1e3),
+                    noise_bounds=(1e-10, 1e1)):
+            self.n_dims = n_dims
+            self.amp_bounds = amp_bounds
+            self.ls_bounds = ls_bounds
+            self.sigma0_bounds = sigma0_bounds
+            self.noise_bounds = noise_bounds
+
+        def build(self):
+            return (ConstantKernel(1.0, self.amp_bounds)
+                    * Matern([1.0] * self.n_dims, self.ls_bounds, nu=2.5)
+                    + DotProduct(1.0, self.sigma0_bounds)
+                    + WhiteKernel(1e-2, self.noise_bounds))
+
+        @staticmethod
+        def eval_autograd(x, X_train, hp):
+            """
+            Evaluates the Tail kernel using autograd for gradient computation.
+            x: 1D array of shape (n_dims,) representing a single input point.
+            X_train: 2D array of shape (n_samples, n_dims) representing the training data.
+            hp: dictionary containing hyperparameters:
+                - 'amp': amplitude (float)
+                - 'length_scales': length scale (float)
+                - 'sigma_0': linear trend coefficient (float)
+            """
+            anp_kernel = (SurrogateKernels._matern52(x, X_train, hp["amp"], hp["length_scales"])
+            + SurrogateKernels._dot(x, X_train, hp["sigma_0"]))
+            return anp_kernel
+
+        def _read_params(self, kernel_origin, p:Dict[str, Any], ndims: int) -> Dict[str, Any]:
+            """
+            Reads the hyperparameters from a dictionary and returns a new dictionary
+            with the relevant parameters for the Tail kernel (used on .eval_autograd method as parameter hp).
+            p: dictionary containing hyperparameters returned from kernel.get_params().
+            Returns a dictionary with keys 'amp', 'length_scales', and 'sigma_0'.
+            """
+            if kernel_origin.__class__ != self.__class__:
+                raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
+            else:
+                try:
+                    amp = p['constant_value']
+                    length_scales = p['length_scale']
+                    sigma_0 = p['sigma_0']
+                    if isinstance(length_scales, float):
+                        length_scales = np.full(ndims, length_scales)
+                    elif isinstance(length_scales, list):
+                        length_scales = np.array(length_scales)
+                    elif isinstance(length_scales, np.ndarray):
+                        pass
+                    else:
+                        raise ValueError(f"Unexpected type for length_scales: {type(length_scales)}")
+
+                    return {'amp': amp, 'length_scales': length_scales, 'sigma_0': sigma_0}
+                    
+                except KeyError as e:
+                    raise KeyError(f"Missing expected hyperparameter key: {e}")
+                except Exception as e:
+                    raise ValueError(f"Error reading hyperparameters: {e}")
+ 
+    class Markowitz:
+        """
+        Amplitude * Matern 5/2 (ARD) + quadratic trend + white noise.
+ 
+        Assumes: the measure is dominated by a global quadratic form, exactly the
+        case for Markowitz variance w^T S w. The squared DotProduct encodes that
+        bowl shape and extrapolates keeping it; the Matern models residual
+        departures; white noise absorbs estimation error.
+ 
+        n_dims: number of projected coordinates (n_assets - 1).
+        amp_bounds, ls_bounds, sigma0_bounds, noise_bounds: optimization bounds.
+        Returns a scikit-learn Kernel.
+        """
+        def __init__(self, n_dims, amp_bounds=(1e-3, 1e3),
+                    ls_bounds=(1e-2, 1e2), sigma0_bounds=(1e-6, 1e3),
+                    noise_bounds=(1e-10, 1e1)):
+            self.n_dims = n_dims
+            self.amp_bounds = amp_bounds
+            self.ls_bounds = ls_bounds
+            self.sigma0_bounds = sigma0_bounds
+            self.noise_bounds = noise_bounds
+
+        def build(self):
+            return (ConstantKernel(1.0, self.amp_bounds)
+                    * Matern([1.0] * self.n_dims, self.ls_bounds, nu=2.5)
+                    + DotProduct(1.0, self.sigma0_bounds) ** 2
+                    + WhiteKernel(1e-2, self.noise_bounds))
+
+        @staticmethod
+        def eval_autograd(x, X_train, hp):
+            """
+            Evaluates the Markowitz kernel using autograd for gradient computation.
+            x: 1D array of shape (n_dims,) representing a single input point.
+            X_train: 2D array of shape (n_samples, n_dims) representing the training data.
+            hp: dictionary containing hyperparameters:
+                - 'amp': amplitude (float)
+                - 'length_scales': length scale (float)
+                - 'sigma_0': linear trend coefficient (float)
+            """
+            anp_kernel = (SurrogateKernels._matern52(x, X_train, hp["amp"], hp["length_scales"])
+            + SurrogateKernels._dot(x, X_train, hp["sigma_0"])**2)
+            return anp_kernel
+
+        def _read_params(self, kernel_origin, p:Dict[str, Any], ndims: int) -> Dict[str, Any]:
+            """
+            Reads the hyperparameters from a dictionary and returns a new dictionary
+            with the relevant parameters for the Markowitz kernel (used on .eval_autograd method as parameter hp).
+            p: dictionary containing hyperparameters returned from kernel.get_params().
+            Returns a dictionary with keys 'amp', 'length_scales', and 'sigma_0'.
+            """
+            if kernel_origin.__class__ != self.__class__:
+                raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
+            else:
+                try:
+                    amp = p['constant_value']
+                    length_scales = p['length_scale']
+                    sigma_0 = p['sigma_0']
+                    if isinstance(length_scales, float):
+                        length_scales = np.full(ndims, length_scales)
+                    elif isinstance(length_scales, list):
+                        length_scales = np.array(length_scales)
+                    elif isinstance(length_scales, np.ndarray):
+                        pass
+                    else:
+                        raise ValueError(f"Unexpected type for length_scales: {type(length_scales)}")
+
+                    return {'amp': amp, 'length_scales': length_scales, 'sigma_0': sigma_0}
+                    
+                except KeyError as e:
+                    raise KeyError(f"Missing expected hyperparameter key: {e}")
+                except Exception as e:
+                    raise ValueError(f"Error reading hyperparameters: {e}")
+
+ 
+    class MultiScale:
+        """
+        Amplitude * RationalQuadratic + white noise.
+ 
+        Assumes: the surface varies at several length-scales at once. The
+        RationalQuadratic is an infinite mixture of RBFs over length-scales
+        (alpha controls the spread), capturing broad and fine variation together.
+        Trade-off: it recovers RBF's infinite smoothness, so for sharp tail
+        measures prefer Tail or TwoScaleMatern.
+ 
+        n_dims: accepted for a consistent interface (RQ is isotropic here).
+        amp_bounds, ls_bounds, alpha_bounds, noise_bounds: optimization bounds.
+        Returns a scikit-learn Kernel.
+        """
+        def __init__(self, n_dims, amp_bounds=(1e-3, 1e3),
+                     ls_bounds=(1e-2, 1e2), alpha_bounds=(1e-2, 1e2),
+                     noise_bounds=(1e-10, 1e1)):
+            self.n_dims = n_dims
+            self.amp_bounds = amp_bounds
+            self.ls_bounds = ls_bounds
+            self.alpha_bounds = alpha_bounds
+            self.noise_bounds = noise_bounds
+
+        def build(self):
+            return (ConstantKernel(1.0, self.amp_bounds)
+                    * RationalQuadratic(1.0, 1.0, self.ls_bounds, self.alpha_bounds)
+                    + WhiteKernel(1e-2, self.noise_bounds))
+
+        @staticmethod
+        def eval_autograd(x, X_train, hp):
+            """
+            Evaluates the MultiScale kernel using autograd for gradient computation.
+            x: 1D array of shape (n_dims,) representing a single input point.
+            X_train: 2D array of shape (n_samples, n_dims) representing the training data.
+            hp: dictionary containing hyperparameters:
+                - 'amp': amplitude (float)
+                - 'length_scale_iso': length scale (float)
+                - 'alpha_rq': alpha parameter for RationalQuadratic (float)
+            """
+            anp_kernel = SurrogateKernels._rational_quadratic(x, X_train, hp["amp"],
+                               hp["length_scale_iso"], hp["alpha_rq"])
+            return anp_kernel
+
+        def _read_params(self, kernel_origin, p:Dict[str, Any], ndims: int) -> Dict[str, Any]:
+            """
+            Reads the hyperparameters from a dictionary and returns a new dictionary
+            with the relevant parameters for the MultiScale kernel (used on .eval_autograd method as parameter hp).
+            p: dictionary containing hyperparameters returned from kernel.get_params().
+            Returns a dictionary with keys 'amp', 'length_scale_iso', and 'alpha_rq'.
+            """
+            if kernel_origin.__class__ != self.__class__:
+                raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
+            else:
+                try:
+                    amp = p['constant_value']
+                    length_scale_iso = p['length_scale']
+                    alpha_rq = p['alpha']
+                    return {'amp': amp, 'length_scale_iso': length_scale_iso, 'alpha_rq': alpha_rq}
+                except KeyError as e:
+                    raise KeyError(f"Missing expected hyperparameter key: {e}")
+                except Exception as e:
+                    raise ValueError(f"Error reading hyperparameters: {e}")
+ 
+    class TwoScaleMatern:
+        """
+        (Amp * Matern 5/2 long ARD) + (Amp * Matern 5/2 short ARD) + white noise.
+ 
+        Assumes: two additive smooth components, a broad slow variation and a
+        fine local detail, each with its own ARD length-scales, while keeping
+        finite (twice-differentiable) smoothness. Explicit-control alternative to
+        MultiScale for sharp tail measures where RBF-like smoothness is unwanted.
+ 
+        n_dims: number of projected coordinates (n_assets - 1).
+        amp_bounds, ls_bounds, noise_bounds: optimization bounds shared by both
+        Matern terms and the noise.
+        Returns a scikit-learn Kernel.
+        """
+        def __init__(self, n_dims, amp_bounds=(1e-3, 1e3),
+                     ls_bounds=(1e-2, 1e2), noise_bounds=(1e-10, 1e1)):
+            self.n_dims = n_dims
+            self.amp_bounds = amp_bounds
+            self.ls_bounds = ls_bounds
+            self.noise_bounds = noise_bounds
+
+        def build(self):
+            return (ConstantKernel(1.0, self.amp_bounds)
+                    * Matern([3.0] * self.n_dims, self.ls_bounds, nu=2.5)
+                    + ConstantKernel(0.5, self.amp_bounds)
+                    * Matern([0.3] * self.n_dims, self.ls_bounds, nu=2.5)
+                    + WhiteKernel(1e-2, self.noise_bounds))  
+
+        @staticmethod
+        def eval_autograd(x, X_train, hp):
+            """
+            Evaluates the TwoScaleMatern kernel using autograd for gradient computation.
+            x: 1D array of shape (n_dims,) representing a single input point.
+            X_train: 2D array of shape (n_samples, n_dims) representing the training data.
+            hp: dictionary containing hyperparameters:
+                - 'amp_long': amplitude for long Matern (float)
+                - 'length_scales_long': length scale for long Matern (float)
+                - 'amp_short': amplitude for short Matern (float)
+                - 'length_scales_short': length scale for short Matern (float)
+            """
+            anp_kernel = (SurrogateKernels._matern52(x, X_train, hp["amp_long"], hp["length_scales_long"])
+                          + SurrogateKernels._matern52(x, X_train, hp["amp_short"], hp["length_scales_short"]))
+            return anp_kernel
+
+        def _read_params(self, kernel_origin, p:Dict[str, Any], ndims: int) -> Dict[str, Any]:
+            """
+            Reads the hyperparameters from a dictionary and returns a new dictionary
+            with the relevant parameters for the TwoScaleMatern kernel (used on .eval_autograd method as parameter hp).
+            p: dictionary containing hyperparameters returned from kernel.get_params().
+            Returns a dictionary with keys 'amp_long', 'length_scales_long', 'amp_short', and 'length_scales_short'.
+            """
+            if kernel_origin.__class__ != self.__class__:
+                raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
+            else:
+                try:
+                    amp_long = p['constant_value']
+                    length_scales_long = p['length_scale']
+                    amp_short = p['constant_value_1']
+                    length_scales_short = p['length_scale_1']
+                    if isinstance(length_scales_long, float):
+                        length_scales_long = np.full(ndims, length_scales_long)
+                    elif isinstance(length_scales_long, list):
+                        length_scales_long = np.array(length_scales_long)
+                    elif isinstance(length_scales_long, np.ndarray):
+                        pass
+                    else:
+                        raise ValueError(f"Unexpected type for length_scales_long: {type(length_scales_long)}")
+
+                    if isinstance(length_scales_short, float):
+                        length_scales_short = np.full(ndims, length_scales_short)
+                    elif isinstance(length_scales_short, list):
+                        length_scales_short = np.array(length_scales_short)
+                    elif isinstance(length_scales_short, np.ndarray):
+                        pass
+                    else:
+                        raise ValueError(f"Unexpected type for length_scales_short: {type(length_scales_short)}")
+
+                    return {
+                        'amp_long': amp_long,
+                        'length_scales_long': length_scales_long,
+                        'amp_short': amp_short,
+                        'length_scales_short': length_scales_short
+                    }
+                    
+                except KeyError as e:
+                    raise KeyError(f"Missing expected hyperparameter key: {e}")
+                except Exception as e:
+                    raise ValueError(f"Error reading hyperparameters: {e}")
+
+
+
+
+
+kernel_classes = Union[SurrogateKernels.Markowitz, 
+                       SurrogateKernels.Plain, 
+                       SurrogateKernels.Tail, 
+                       SurrogateKernels.TwoScaleMatern, 
+                       SurrogateKernels.MultiScale]
+
+
+
+
+   
 
 class SurrogateGPR:
     """
@@ -40,7 +462,7 @@ class SurrogateGPR:
     additive in the weights, not multiplicative.
     """
  
-    def __init__(self, kernel: Kernel,
+    def __init__(self, kernel_obj: kernel_classes,
                  n_assets: int,
                  n_restarts: int,
                  sim_obj: Optional[str],
@@ -61,7 +483,8 @@ class SurrogateGPR:
             safety against a non-invertible matrix when points are very close;
             not a noise model.
         """
-        self.kernel = kernel                # initial prior
+        self.kernel_obj = kernel_obj            # initial prior
+        self.kernel = kernel_obj.build()        # initial prior, ready for sklearn
         self.kernel_ = None                 # fitted kernel, filled after fit
         self.n_restarts = n_restarts
         self.sim_obj = sim_obj
@@ -263,121 +686,3 @@ class SurrogateGPR:
                 f" └── <Kernel: {self.kernel}>")
 
 
-
- 
- 
-class SurrogateKernels:
-    """
-    Namespace of ready-to-use kernel priors. Each nested class returns a composed
-    scikit-learn Kernel when instantiated; see each docstring for the assumptions
-    it makes and when to use it.
-    """
- 
-    class Plain:
-        """
-        Amplitude * Matern 5/2 (ARD) + white noise.
- 
-        Assumes: a smooth, twice-differentiable stationary signal with no known
-        global trend, plus homogeneous estimation noise. Matern 5/2 keeps two
-        derivatives (unlike RBF's infinite smoothness, which over-smooths regime
-        breaks) while ARD gives each projected coordinate its own length-scale.
-        The safe default when the surface's global shape is unknown.
- 
-        n_dims: number of projected coordinates (n_assets - 1).
-        amp_bounds, ls_bounds, noise_bounds: optimization bounds for amplitude,
-        length-scales, and noise level.
-        Returns a scikit-learn Kernel.
-        """
-        def __new__(cls, n_dims, amp_bounds=(1e-3, 1e3),
-                    ls_bounds=(1e-2, 1e2), noise_bounds=(1e-6, 1e1)):
-            return (ConstantKernel(1.0, amp_bounds)
-                    * Matern([1.0] * n_dims, ls_bounds, nu=2.5)
-                    + WhiteKernel(1e-2, noise_bounds))
- 
-    class Tail:
-        """
-        Amplitude * Matern 5/2 (ARD) + linear trend + white noise.
- 
-        Assumes: a smooth signal riding on a dominant linear trend, plus
-        estimation noise. For ratio/tail measures (Sharpe, VaR, CVaR, STARR):
-        the Matern captures local curvature and the added DotProduct supplies a
-        global direction the Matern alone would not extrapolate, reverting to the
-        mean away from data. White noise matters because bootstrap/tail estimates
-        are noisy.
- 
-        n_dims: number of projected coordinates (n_assets - 1).
-        amp_bounds, ls_bounds, sigma0_bounds, noise_bounds: optimization bounds.
-        Returns a scikit-learn Kernel.
-        """
-        def __new__(cls, n_dims, amp_bounds=(1e-3, 1e3),
-                    ls_bounds=(1e-2, 1e2), sigma0_bounds=(1e-3, 1e3),
-                    noise_bounds=(1e-6, 1e1)):
-            return (ConstantKernel(1.0, amp_bounds)
-                    * Matern([1.0] * n_dims, ls_bounds, nu=2.5)
-                    + DotProduct(1.0, sigma0_bounds)
-                    + WhiteKernel(1e-2, noise_bounds))
- 
-    class Markowitz:
-        """
-        Amplitude * Matern 5/2 (ARD) + quadratic trend + white noise.
- 
-        Assumes: the measure is dominated by a global quadratic form, exactly the
-        case for Markowitz variance w^T S w. The squared DotProduct encodes that
-        bowl shape and extrapolates keeping it; the Matern models residual
-        departures; white noise absorbs estimation error.
- 
-        n_dims: number of projected coordinates (n_assets - 1).
-        amp_bounds, ls_bounds, sigma0_bounds, noise_bounds: optimization bounds.
-        Returns a scikit-learn Kernel.
-        """
-        def __new__(cls, n_dims, amp_bounds=(1e-3, 1e3),
-                    ls_bounds=(1e-2, 1e2), sigma0_bounds=(1e-3, 1e3),
-                    noise_bounds=(1e-6, 1e1)):
-            return (ConstantKernel(1.0, amp_bounds)
-                    * Matern([1.0] * n_dims, ls_bounds, nu=2.5)
-                    + DotProduct(1.0, sigma0_bounds) ** 2
-                    + WhiteKernel(1e-2, noise_bounds))
- 
-    class MultiScale:
-        """
-        Amplitude * RationalQuadratic + white noise.
- 
-        Assumes: the surface varies at several length-scales at once. The
-        RationalQuadratic is an infinite mixture of RBFs over length-scales
-        (alpha controls the spread), capturing broad and fine variation together.
-        Trade-off: it recovers RBF's infinite smoothness, so for sharp tail
-        measures prefer Tail or TwoScaleMatern.
- 
-        n_dims: accepted for a consistent interface (RQ is isotropic here).
-        amp_bounds, ls_bounds, alpha_bounds, noise_bounds: optimization bounds.
-        Returns a scikit-learn Kernel.
-        """
-        def __new__(cls, n_dims, amp_bounds=(1e-3, 1e3),
-                    ls_bounds=(1e-2, 1e2), alpha_bounds=(1e-2, 1e2),
-                    noise_bounds=(1e-6, 1e1)):
-            return (ConstantKernel(1.0, amp_bounds)
-                    * RationalQuadratic(1.0, 1.0, ls_bounds, alpha_bounds)
-                    + WhiteKernel(1e-2, noise_bounds))
- 
-    class TwoScaleMatern:
-        """
-        (Amp * Matern 5/2 long ARD) + (Amp * Matern 5/2 short ARD) + white noise.
- 
-        Assumes: two additive smooth components, a broad slow variation and a
-        fine local detail, each with its own ARD length-scales, while keeping
-        finite (twice-differentiable) smoothness. Explicit-control alternative to
-        MultiScale for sharp tail measures where RBF-like smoothness is unwanted.
- 
-        n_dims: number of projected coordinates (n_assets - 1).
-        amp_bounds, ls_bounds, noise_bounds: optimization bounds shared by both
-        Matern terms and the noise.
-        Returns a scikit-learn Kernel.
-        """
-        def __new__(cls, n_dims, amp_bounds=(1e-3, 1e3),
-                    ls_bounds=(1e-2, 1e2), noise_bounds=(1e-6, 1e1)):
-            return (ConstantKernel(1.0, amp_bounds)
-                    * Matern([3.0] * n_dims, ls_bounds, nu=2.5)
-                    + ConstantKernel(0.5, amp_bounds)
-                    * Matern([0.3] * n_dims, ls_bounds, nu=2.5)
-                    + WhiteKernel(1e-2, noise_bounds))
- 

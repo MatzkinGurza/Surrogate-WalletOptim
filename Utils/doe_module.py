@@ -162,9 +162,10 @@ class SamplerShell:
     freedom removed by its geometric constraint (e.g. the simplex
     constraint sum(x) = 1 removes one free coordinate). When mapper_cls is
     omitted, the sampler is built directly with dim dimensions and its
-    [0,1]^dim output is rescaled to `bounds`.
-
+    [0,1]^dim output is rescaled to `bounds`. </p>
+    
     Parameters:
+    
     sampler_cls (type): LHS or Sobol, the base [0,1]^d sampler to use.
     dim (int): true number of dimensions of the sampled space.
     mapper_cls (type, optional): geometry mapper applied to the sampler's
