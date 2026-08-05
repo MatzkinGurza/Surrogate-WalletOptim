@@ -30,6 +30,7 @@ Outputs/logs/
 # test/
 Tests/test_surrogate.*
 Tests/test_financial.*
+Tests/test_true_pipeline.html
 
 # Editor / SO
 .vscode/
