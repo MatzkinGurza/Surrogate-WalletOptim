@@ -28,6 +28,8 @@ Outputs/logs/
 # Test/
 # tests/
 # test/
+Tests/test_surrogate.*
+Tests/test_financial.*
 
 # Editor / SO
 .vscode/

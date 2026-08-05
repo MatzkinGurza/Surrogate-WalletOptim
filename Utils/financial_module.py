@@ -215,7 +215,7 @@ class VaR:
         assert ret.size > 0, f"ret array must contain more than 0 entries (current is {ret.size})"
         if self.type == "non-parametric":
             ret_sorted = self.orderDistibution(ret)
-            return np.percentile(ret, self.alpha*100, method="higher"), ret_sorted
+            return np.percentile(ret, (1-self.alpha)*100, method="higher"), ret_sorted
         elif self.type == "parametric":
             mu = ret.mean()
             sigma = ret.std(ddof=1)
@@ -232,6 +232,11 @@ class CVaR(VaR):
     CVaR Class is a Callable Object implemented so that any instance of CVaR deals only with 
     a predefined set of portfolio cases to avoid mistaken comparison between portfolios of different characteristics.
     In this sense, CVaR predefines alpha, number of assets and type of calculation.
+    Parameters:
+    n_assets (int): number of assets in the portfolio;</p>
+    alpha (float): confidence level for VaR/CVaR, between 0 and 1 where alpha represents the probability of exceeding the risk threshold.
+    an alpha of 95% returns the mean of the worst 5% of returns;</p>
+    type (Literal["non-parametric", "parametric"]): calculation method for VaR and CVaR.
     """
     def __init__(self, n_assets: int, 
                  alpha:float, 

@@ -29,8 +29,22 @@ from sklearn.gaussian_process.kernels import Kernel
 
 import autograd.numpy as anp
 
- 
- 
+
+def _param_by_suffix(p: Dict[str, Any], suffix: str, index: int = 0):
+    """
+    Kernel.get_params(deep=True) on a composite (Sum/Product) kernel returns dotted keys
+    like 'k1__k1__constant_value' rather than a flat 'constant_value', so a direct p[suffix]
+    lookup never matches. This finds the `index`-th key (sorted for determinism) whose last
+    dotted segment equals `suffix`; used to disambiguate kernels with more than one match
+    (e.g. TwoScaleMatern's two 'constant_value'/'length_scale' terms).
+    """
+    matches = sorted(k for k in p if k.rsplit('__', 1)[-1] == suffix)
+    if not matches:
+        raise KeyError(suffix)
+    return p[matches[index]]
+
+
+
 class SurrogateKernels:
     """
     Namespace of ready-to-use kernel priors. Each nested class returns a composed
@@ -113,8 +127,8 @@ class SurrogateKernels:
                 raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
             else:
                 try:
-                    amp = p['constant_value']
-                    length_scales = p['length_scale']
+                    amp = _param_by_suffix(p, 'constant_value')
+                    length_scales = _param_by_suffix(p, 'length_scale')
                     if isinstance(length_scales, float):
                         length_scales = np.full(ndims, length_scales)
                     elif isinstance(length_scales, list):
@@ -190,9 +204,9 @@ class SurrogateKernels:
                 raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
             else:
                 try:
-                    amp = p['constant_value']
-                    length_scales = p['length_scale']
-                    sigma_0 = p['sigma_0']
+                    amp = _param_by_suffix(p, 'constant_value')
+                    length_scales = _param_by_suffix(p, 'length_scale')
+                    sigma_0 = _param_by_suffix(p, 'sigma_0')
                     if isinstance(length_scales, float):
                         length_scales = np.full(ndims, length_scales)
                     elif isinstance(length_scales, list):
@@ -203,12 +217,12 @@ class SurrogateKernels:
                         raise ValueError(f"Unexpected type for length_scales: {type(length_scales)}")
 
                     return {'amp': amp, 'length_scales': length_scales, 'sigma_0': sigma_0}
-                    
+
                 except KeyError as e:
                     raise KeyError(f"Missing expected hyperparameter key: {e}")
                 except Exception as e:
                     raise ValueError(f"Error reading hyperparameters: {e}")
- 
+
     class Markowitz:
         """
         Amplitude * Matern 5/2 (ARD) + quadratic trend + white noise.
@@ -263,9 +277,9 @@ class SurrogateKernels:
                 raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
             else:
                 try:
-                    amp = p['constant_value']
-                    length_scales = p['length_scale']
-                    sigma_0 = p['sigma_0']
+                    amp = _param_by_suffix(p, 'constant_value')
+                    length_scales = _param_by_suffix(p, 'length_scale')
+                    sigma_0 = _param_by_suffix(p, 'sigma_0')
                     if isinstance(length_scales, float):
                         length_scales = np.full(ndims, length_scales)
                     elif isinstance(length_scales, list):
@@ -337,9 +351,9 @@ class SurrogateKernels:
                 raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
             else:
                 try:
-                    amp = p['constant_value']
-                    length_scale_iso = p['length_scale']
-                    alpha_rq = p['alpha']
+                    amp = _param_by_suffix(p, 'constant_value')
+                    length_scale_iso = _param_by_suffix(p, 'length_scale')
+                    alpha_rq = _param_by_suffix(p, 'alpha')
                     return {'amp': amp, 'length_scale_iso': length_scale_iso, 'alpha_rq': alpha_rq}
                 except KeyError as e:
                     raise KeyError(f"Missing expected hyperparameter key: {e}")
@@ -401,10 +415,13 @@ class SurrogateKernels:
                 raise ValueError(f"kernel_origin must be an instance of {self.__class__.__name__}")
             else:
                 try:
-                    amp_long = p['constant_value']
-                    length_scales_long = p['length_scale']
-                    amp_short = p['constant_value_1']
-                    length_scales_short = p['length_scale_1']
+                    # two ConstantKernel*Matern branches share the 'constant_value'/'length_scale'
+                    # suffix; index 0/1 picks the first (long) vs. second (short) branch, matching
+                    # the build() order below
+                    amp_long = _param_by_suffix(p, 'constant_value', index=0)
+                    length_scales_long = _param_by_suffix(p, 'length_scale', index=0)
+                    amp_short = _param_by_suffix(p, 'constant_value', index=1)
+                    length_scales_short = _param_by_suffix(p, 'length_scale', index=1)
                     if isinstance(length_scales_long, float):
                         length_scales_long = np.full(ndims, length_scales_long)
                     elif isinstance(length_scales_long, list):

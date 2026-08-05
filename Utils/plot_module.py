@@ -1115,3 +1115,145 @@ def plot_surrogate_comparison_3d_interactive(models: Dict[str, Any],
     )
     return fig
 
+
+def plot_efficient_frontier(frontiers: Dict[str, Dict[str, np.ndarray]],
+                             risk_label: str,
+                             title: str,
+                             return_label: str = "Expected return",
+                             colors: Optional[Sequence[str]] = None,
+                             figsize: Tuple[float, float] = (7, 5.5),
+                             ax=None):
+    """
+    Plot one or more efficient frontiers on the same axes: predicted risk on
+    the horizontal axis, expected return on the vertical axis, one line with
+    markers per frontier. Meant to compare optimizer runs against each other
+    (e.g. an equality vs. an inequality return constraint) rather than to
+    plot a single frontier in isolation.
+
+    frontiers: mapping from a display name (used as the legend label) to a
+        dict with two same-length arrays, "risk" and "return", one entry per
+        optimized portfolio, and optionally a boolean array "feasible"
+        (defaults to all True when omitted). Neither key's sign or scale is
+        assumed; the risk axis label is entirely controlled by risk_label, so
+        the same function works for CVaR, variance, or any other measure.
+    risk_label: label for the horizontal axis, naming whichever risk measure
+        "risk" holds (e.g. a signed CVaR, so the caller controls the sign
+        convention shown to the reader).
+    title: plot title.
+    return_label: label for the vertical axis.
+    colors: one color per frontier; defaults to DOE_PALETTE, cycled.
+    figsize: size of the created figure; ignored when ax is given.
+    ax: existing 2D axes to draw on; a new figure/axes are created when
+        omitted.
+
+    Points flagged infeasible (feasible=False) are kept on the line but drawn
+    as hollow markers, distinguishing an unmet return constraint from a
+    genuinely optimal point without discarding it from the picture.
+
+    Returns: (fig, ax).
+    """
+    colors = colors or DOE_PALETTE
+
+    created_fig = ax is None
+    if created_fig:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    for idx, (name, data) in enumerate(frontiers.items()):
+        risk = np.asarray(data["risk"], dtype=float)
+        ret = np.asarray(data["return"], dtype=float)
+        feasible = np.asarray(data.get("feasible", np.ones_like(risk, dtype=bool)), dtype=bool)
+
+        order = np.argsort(risk)
+        risk, ret, feasible = risk[order], ret[order], feasible[order]
+        color = colors[idx % len(colors)]
+
+        ax.plot(risk, ret, color=color, lw=1.6, alpha=0.85, zorder=2, label=name)
+        if np.any(feasible):
+            ax.scatter(risk[feasible], ret[feasible], color=color, s=38,
+                       edgecolor="white", linewidth=0.5, zorder=3)
+        if np.any(~feasible):
+            ax.scatter(risk[~feasible], ret[~feasible], facecolors="none", edgecolors=color,
+                       s=55, linewidth=1.4, zorder=3, marker="o")
+
+    ax.set_xlabel(risk_label, fontsize=11)
+    ax.set_ylabel(return_label, fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize="small")
+    if title:
+        ax.set_title(title, fontsize=13, pad=10)
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, ax
+
+
+def plot_optimal_compositions(risk: np.ndarray,
+                               weights: np.ndarray,
+                               asset_labels: Sequence[str],
+                               risk_label: str,
+                               title: str,
+                               colors: Optional[Sequence[str]] = None,
+                               figsize: Tuple[float, float] = (8, 5.5),
+                               ax=None):
+    """
+    Plot the composition of a family of optimal portfolios as risk varies,
+    as a stacked area chart: risk on the horizontal axis, one band per asset
+    on the vertical axis (0 to 1), summing to 1 at every position. Meant to
+    read how diversification changes along the risk axis, from a
+    concentrated high-risk portfolio to a diversified low-risk one (or the
+    reverse, depending on the measure's sign convention, which is left to
+    risk_label to communicate).
+
+    risk: array (n_portfolios,), the predicted risk of each optimized
+        portfolio, exactly as reported by the optimizer (no sign flip is
+        applied here).
+    weights: array (n_portfolios, n_assets), the optimal weights for each
+        portfolio in `risk`, rows summing to 1. The number of assets is read
+        from this array's shape; nothing about it is hard-coded.
+    asset_labels: one name per asset (column of weights), used for the
+        legend.
+    risk_label: label for the horizontal axis.
+    title: plot title.
+    colors: one color per asset; defaults to DOE_PALETTE, cycled.
+    figsize: size of the created figure; ignored when ax is given.
+    ax: existing 2D axes to draw on; a new figure/axes are created when
+        omitted.
+
+    Portfolios are sorted by ascending risk before stacking, so the bands
+    read left to right in a consistent order regardless of the order they
+    were computed in.
+
+    Returns: (fig, ax).
+    """
+    risk = np.asarray(risk, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    n_assets = weights.shape[1]
+    colors = colors or DOE_PALETTE
+    palette = [colors[i % len(colors)] for i in range(n_assets)]
+
+    order = np.argsort(risk)
+    risk_sorted = risk[order]
+    weights_sorted = weights[order]
+
+    created_fig = ax is None
+    if created_fig:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    ax.stackplot(risk_sorted, weights_sorted.T, labels=asset_labels, colors=palette, alpha=0.9)
+
+    ax.set_xlabel(risk_label, fontsize=11)
+    ax.set_ylabel("Portfolio weight", fontsize=11)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper right", fontsize="small")
+    if title:
+        ax.set_title(title, fontsize=13, pad=10)
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, ax
+
